@@ -14,6 +14,8 @@ from utils.utils import normalize_adj
 
 from torch_geometric.explain import Explanation
 from torch_geometric.explain.algorithm import ExplainerAlgorithm
+from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj, subgraph
+from torch_geometric.explain.config import ExplanationType
 
 
 
@@ -26,7 +28,6 @@ class CFExplainer(ExplainerAlgorithm):
 
 
     """
-
     coeffs = {
         'n_hid': 20,
         'dropout': 0.5,
@@ -60,17 +61,24 @@ class CFExplainer(ExplainerAlgorithm):
     def forward(
         self,
         model: torch.nn.Module,
-        x: Tensor,
+        x: Tensor, # input node features
         edge_index: Tensor,
         *,
         target: Tensor,
         index: Optional[Union[int, Tensor]] = None,
         **kwargs,
     ): # -> Explanation | our custom type:
-        # TODO: Should get_neighbourhood() be celled here?
-        # get_neighbourhood(x, edge_index, ?n_hops, ?features, ?labels)
-        self.node_idx = 0#node_idx
-        self.new_idx = 0#new_idx
+        if index is None:
+            index = Tensor(range(len(x)))
+
+        nodes, edge_subset, new_index, _ = k_hop_subgraph(index, num_hops=3, edge_index=edge_index)
+
+        self.sub_adj = to_dense_adj(edge_subset).squeeze()
+        self.sub_feat = x[nodes, :]
+        # sub_labels = labels[nodes]
+
+        self.node_idx = index
+        self.new_idx = new_index
 
         model.eval()
 
@@ -121,7 +129,7 @@ class CFExplainer(ExplainerAlgorithm):
 
     def train(
         self,
-        cf_model: torch.nn.Module,
+        cf_model: GCNSyntheticPerturb,
         optimizer: optim.Optimizer,
         epoch: int,
     ):
@@ -165,7 +173,7 @@ class CFExplainer(ExplainerAlgorithm):
                 self.y_pred_orig.item(),
                 y_pred_new.item(),
                 y_pred_new_actual.item(),
-                self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
+                # self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
                 loss_total.item(),
                 loss_pred.item(),
                 loss_graph_dist.item()
@@ -176,12 +184,12 @@ class CFExplainer(ExplainerAlgorithm):
 
     def supports(self):
         # TODO: check values in Explainer
-        # explanation_type = self.explainer_config.explanation_type
-        # if explanation_type != ExplanationType.phenomenon:
-        #     logging.error(f"'{self.__class__.__name__}' only supports "
-        #                   f"phenomenon explanations "
-        #                   f"got (`explanation_type={explanation_type.value}`)")
-        #     return False
+        explanation_type = self.explainer_config.explanation_type
+        if explanation_type != ExplanationType.model:
+            # logging.error(f"'{self.__class__.__name__}' only supports "
+            #               f"phenomenon explanations "
+            #               f"got (`explanation_type={explanation_type.value}`)")
+            return False
 
         # task_level = self.model_config.task_level
         # if task_level not in {ModelTaskLevel.node, ModelTaskLevel.graph}:
