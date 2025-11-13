@@ -31,7 +31,7 @@ class CFExplainer(ExplainerAlgorithm):
     coeffs = {
         'n_hid': 20,
         'dropout': 0.5,
-        'num_classes': 2,
+        'num_classes': 2, #TODO where to put?
         'beta': 0.5,
     }
 
@@ -87,7 +87,7 @@ class CFExplainer(ExplainerAlgorithm):
             self.sub_feat.shape[1],
             self.coeffs['n_hid'],
             self.coeffs['n_hid'],
-            self.num_classes,
+            self.coeffs['num_classes'],
             self.sub_adj,
             self.coeffs['dropout'],
             self.coeffs['beta'],
@@ -208,9 +208,9 @@ class CFExplainer(ExplainerAlgorithm):
         return True
 
 
-    def __call__(self):
-        # data.x, data.edge_index, index=node_index
-        pass
+    # def __call__(self):
+    #     # data.x, data.edge_index, index=node_index
+    #     pass
 
 
 

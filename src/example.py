@@ -7,7 +7,7 @@ from torch_geometric.explain import Explainer, GraphMaskExplainer
 from torch_geometric.utils import dense_to_sparse
 from utils.utils import get_neighbourhood
 
-from cf_explanation.cf_explainer import CFExplainerOriginal
+from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
 from torch_geometric.nn import GCNConv
 
 
@@ -88,31 +88,48 @@ def main():
 
     # print(data.edge_index)
 
+
+    explainer = Explainer(
+        model=model,
+        algorithm=CFExplainer(epochs=200, lr=0.001),
+        explanation_type='model',
+        edge_mask_type='object',
+        model_config=dict(
+            mode='multiclass_classification',
+            task_level='node',
+            return_type='log_probs',
+        ),
+    )
+
     test_cf_examples = []
+    print(torch.where(data.test_mask))
     for i in torch.where(data.test_mask)[0]:
         print(f"generating CF for {i} with {predictions[i], data.y[i]}")
 
-        sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i),
-                                                                     data.edge_index,
-                                                                     2,
-                                                                     data.x,
-                                                                     data.y)
-        new_idx = node_dict[int(i)]
+        # sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i),
+        #                                                              data.edge_index,
+        #                                                              2, # Magic number!
+        #                                                              data.x,
+        #                                                              data.y)
+        # new_idx = node_dict[int(i)]
 
-        explainer = CFExplainerOriginal(model=model,
-                                        sub_adj=sub_adj,
-                                        sub_feat=sub_feat,
-                                        n_hid=20,
-                                        dropout=0.5,
-                                        sub_labels=sub_labels,
-                                        y_pred_orig= predictions[i],
-                                        num_classes = 2,
-                                        beta=.5,
-                                        device=device)
+        # explainer = CFExplainerOriginal(model=model,
+        #                                 sub_adj=sub_adj,
+        #                                 sub_feat=sub_feat,
+        #                                 n_hid=20,
+        #                                 dropout=0.5,
+        #                                 sub_labels=sub_labels,
+        #                                 y_pred_orig= predictions[i],
+        #                                 num_classes = 2,
+        #                                 beta=.5,
+        #                                 device=device)
 
-        cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
-                                    n_momentum=0.0, num_epochs=200)
-        test_cf_examples.append(cf_example)
+        # cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
+        #                             n_momentum=0.0, num_epochs=200)
+
+        cf_explanation = explainer(data.x, data.edge_index, index=int(i))
+
+        test_cf_examples.append(cf_explanation)
 
 
     print(test_cf_examples)
