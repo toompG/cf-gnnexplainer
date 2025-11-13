@@ -1,12 +1,12 @@
 # Based on https://github.com/RexYing/gnn-model-explainer/blob/master/explainer/explain.py
 
-import math
+from typing import List, Dict, Optional, Tuple, Union
+
 import time
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import torch.optim as optim
+from torch import Tensor
 from torch.nn.utils import clip_grad_norm
 from utils.utils import get_degree_matrix
 from .gcn_perturb import GCNSyntheticPerturb
@@ -27,29 +27,183 @@ class CFExplainer(ExplainerAlgorithm):
 
     """
 
+    coeffs = {
+        'n_hid': 20,
+        'dropout': 0.5,
+        'num_classes': 2,
+        'beta': 0.5,
+    }
+
     def __init__(
         self,
-        num_layers: int,
+        epochs: int = 200,
+        lr: float = 0.001,
+        cf_optimizer: str = 'SGD',
+        n_momentum: float = 0,
+        **kwargs,
     ):
         super().__init__()
-        self.num_layers = num_layers
+        self.epochs = epochs
+        self.lr = lr
+        self.cf_optimizer = cf_optimizer
+        self.n_momentum = n_momentum
 
-        self._explainer_config = None
-        self._model_config = None
+        self.coeffs.update(kwargs)
+
+        # self.sub_feat
+        # self.sub_adj
+        # self.sub_labels
+
+        # self._explainer_config = None
+        # self._model_config = None
 
     def forward(
-            self
+        self,
+        model: torch.nn.Module,
+        x: Tensor,
+        edge_index: Tensor,
+        *,
+        target: Tensor,
+        index: Optional[Union[int, Tensor]] = None,
+        **kwargs,
+    ): # -> Explanation | our custom type:
+        # TODO: Should get_neighbourhood() be celled here?
+        # get_neighbourhood(x, edge_index, ?n_hops, ?features, ?labels)
+        self.node_idx = 0#node_idx
+        self.new_idx = 0#new_idx
+
+        model.eval()
+
+        # Instantiate CF model class, load weights from original model
+        cf_model = GCNSyntheticPerturb(
+            self.sub_feat.shape[1],
+            self.coeffs['n_hid'],
+            self.coeffs['n_hid'],
+            self.num_classes,
+            self.sub_adj,
+            self.coeffs['dropout'],
+            self.coeffs['beta'],
+        )
+
+        cf_model.load_state_dict(model.state_dict(), strict=False)
+
+        # Freeze weights from original model in cf_model
+        for name, param in cf_model.named_parameters():
+            if name.endswith("weight") or name.endswith("bias"):
+                param.requires_grad = False
+
+
+        if self.cf_optimizer == 'SGD':
+            optimizer = optim.SGD(
+                cf_model.parameters(),
+                self.lr,
+                self.n_momentum,
+                nesterov=(self.n_momentum != 0.0),
+            )
+        elif self.cf_optimizer == 'Adadelta':
+            optimizer = optim.Adadelta(
+                cf_model.parameters(),
+                self.lr,
+            )
+        else:
+            raise ValueError('Invalid optimizer')
+
+        best_cf_example = []
+        best_loss = np.inf
+
+        for epoch in range(self.epochs):
+            new_example, loss_total = self.train(cf_model, optimizer, epoch)
+
+            if new_example and loss_total < best_loss:
+                best_cf_example.append(new_example)
+                best_loss = loss_total
+        return (best_cf_example)
+
+    def train(
+        self,
+        cf_model: torch.nn.Module,
+        optimizer: optim.Optimizer,
+        epoch: int,
     ):
-        pass
+        r''' e@@@@@@@@@@@@@@@
+            @@@""""""""""
+           @" ___ ___________
+          II__[w] | [i] [z] |
+         {======|_|~~~~~~~~~|
+        /oO--000""`-OO---OO-'''
+
+        cf_model.train()
+        optimizer.zero_grad()
+
+        # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
+        # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
+        output = cf_model.forward(self.sub_feat, self.sub_adj) # (x, A_x)
+        output_actual, self.P = cf_model.forward_prediction(self.sub_feat) # (x)
+
+        # Need to use new_idx from now on since sub_adj is reindexed
+        y_pred_new = torch.argmax(output[self.new_idx])
+        y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
+
+        # loss_pred indicator should be based on y_pred_new_actual NOT y_pred_new!
+        loss_total, loss_pred, loss_graph_dist, cf_adj = cf_model.loss(
+            output[self.new_idx],
+            self.y_pred_orig,
+            y_pred_new_actual,
+        )
+        
+        loss_total.backward()
+        clip_grad_norm(cf_model.parameters(), 2.0)
+        optimizer.step()
+
+        cf_stats = []
+        if y_pred_new_actual != self.y_pred_orig:
+            cf_stats = [
+                self.node_idx.item(),
+                self.new_idx.item(),
+                cf_adj.detach().numpy(),
+                self.sub_adj.detach().numpy(),
+                self.y_pred_orig.item(),
+                y_pred_new.item(),
+                y_pred_new_actual.item(),
+                self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
+                loss_total.item(),
+                loss_pred.item(),
+                loss_graph_dist.item()
+            ]
+
+        return (cf_stats, loss_total.item())
+
 
     def supports(self):
         # TODO: check values in Explainer
+        # explanation_type = self.explainer_config.explanation_type
+        # if explanation_type != ExplanationType.phenomenon:
+        #     logging.error(f"'{self.__class__.__name__}' only supports "
+        #                   f"phenomenon explanations "
+        #                   f"got (`explanation_type={explanation_type.value}`)")
+        #     return False
+
+        # task_level = self.model_config.task_level
+        # if task_level not in {ModelTaskLevel.node, ModelTaskLevel.graph}:
+        #     logging.error(f"'{self.__class__.__name__}' only supports "
+        #                   f"node-level or graph-level explanations "
+        #                   f"got (`task_level={task_level.value}`)")
+        #     return False
+
+        # node_mask_type = self.explainer_config.node_mask_type
+        # if node_mask_type is not None:
+        #     logging.error(f"'{self.__class__.__name__}' does not support "
+        #                   f"explaining input node features "
+        #                   f"got (`node_mask_type={node_mask_type.value}`)")
+        #     return False
+
         return True
 
 
     def __call__(self):
         # data.x, data.edge_index, index=node_index
         pass
+
 
 
 
@@ -62,8 +216,8 @@ class CFExplainerOriginal():
 
     def __init__(self, model, sub_adj, sub_feat, n_hid, dropout, sub_labels,
                  y_pred_orig, num_classes, beta, device):
-        super(CFExplainer,
-              self).__init__()  # init superclass, inherits nothing
+        # super(CFExplainer,      # This does nothing?
+        #       self).__init__()  # init superclass, inherits nothing
         self.model = model # trained gcnconv model
         self.model.eval()
         self.sub_adj = sub_adj # adjacency matrix to explain
@@ -100,7 +254,7 @@ class CFExplainerOriginal():
 
         self.x = self.sub_feat
         self.A_x = self.sub_adj
-        self.D_x = get_degree_matrix(self.A_x)
+        self.D_x = get_degree_matrix(self.A_x) # Never used?
 
         if cf_optimizer == "SGD" and n_momentum == 0.0:
             self.cf_optimizer = optim.SGD(self.cf_model.parameters(), lr=lr)
