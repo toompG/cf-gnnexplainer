@@ -74,7 +74,8 @@ def train_model(data, dataset, device, end=200):
 
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # TODO support device=cuda
+    device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data, dataset = get_dataset(nodes=150, motifs = 7, device=device)
 
     model = train_model(data, dataset, device, end=1000)
@@ -91,7 +92,7 @@ def main():
 
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=200, lr=0.001),
+        algorithm=CFExplainer(epochs=200, lr=0.001, predictions=predictions),
         explanation_type='model',
         edge_mask_type='object',
         model_config=dict(
@@ -127,7 +128,7 @@ def main():
         # cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
         #                             n_momentum=0.0, num_epochs=200)
 
-        cf_explanation = explainer(data.x, data.edge_index, index=int(i))
+        cf_explanation = explainer(data.x, data.edge_index, index=i)
 
         test_cf_examples.append(cf_explanation)
 

@@ -18,7 +18,6 @@ from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj,
 from torch_geometric.explain.config import ExplanationType
 
 
-
 class CFExplainer(ExplainerAlgorithm):
     r"""
     ExplainerAlgorithm: Forward, explainer_config and model_config seem fun to use
@@ -37,101 +36,89 @@ class CFExplainer(ExplainerAlgorithm):
 
     def __init__(
         self,
+        predictions: Tensor,
         epochs: int = 200,
         lr: float = 0.001,
-        cf_optimizer: str = 'SGD',
-        n_momentum: float = 0,
+        optimizer: str = 'SGD',
+        n_momentum: float = 0.0,
         **kwargs,
     ):
         super().__init__()
+        self.predictions = predictions
         self.epochs = epochs
         self.lr = lr
-        self.cf_optimizer = cf_optimizer
+        self.optimizer = optimizer
         self.n_momentum = n_momentum
 
         self.coeffs.update(kwargs)
 
-        # self.sub_feat
-        # self.sub_adj
-        # self.sub_labels
-
-        # self._explainer_config = None
-        # self._model_config = None
-
     def forward(
         self,
         model: torch.nn.Module,
-        x: Tensor, # input node features
+        x: Tensor,
         edge_index: Tensor,
         *,
         target: Tensor,
         index: Optional[Union[int, Tensor]] = None,
         **kwargs,
-    ): # -> Explanation | our custom type:
+    ) -> Explanation:
         if index is None:
             index = Tensor(range(len(x)))
 
-        nodes, edge_subset, new_index, _ = k_hop_subgraph(index, num_hops=3, edge_index=edge_index)
-
-        self.sub_adj = to_dense_adj(edge_subset).squeeze()
-        self.sub_feat = x[nodes, :]
-        # sub_labels = labels[nodes]
-
-        self.node_idx = index
-        self.new_idx = new_index
-
-        model.eval()
+        new_index, sub_feat, sub_adj = self._get_neighbourhood(x, edge_index, index)
 
         # Instantiate CF model class, load weights from original model
         cf_model = GCNSyntheticPerturb(
-            self.sub_feat.shape[1],
+            sub_feat.shape[1],
             self.coeffs['n_hid'],
             self.coeffs['n_hid'],
             self.coeffs['num_classes'],
-            self.sub_adj,
+            sub_adj,
             self.coeffs['dropout'],
             self.coeffs['beta'],
         )
 
-        cf_model.load_state_dict(model.state_dict(), strict=False)
+        cf_model.load_state_dict(model.eval().state_dict(), strict=False)
+        cf_optimizer = self._initialize_cf_optimizer(cf_model)
+        y_pred = self.predictions[index]
 
         # Freeze weights from original model in cf_model
         for name, param in cf_model.named_parameters():
             if name.endswith("weight") or name.endswith("bias"):
                 param.requires_grad = False
 
-
-        if self.cf_optimizer == 'SGD':
-            optimizer = optim.SGD(
-                cf_model.parameters(),
-                self.lr,
-                self.n_momentum,
-                nesterov=(self.n_momentum != 0.0),
-            )
-        elif self.cf_optimizer == 'Adadelta':
-            optimizer = optim.Adadelta(
-                cf_model.parameters(),
-                self.lr,
-            )
-        else:
-            raise ValueError('Invalid optimizer')
-
         best_cf_example = []
         best_loss = np.inf
 
         for epoch in range(self.epochs):
-            new_example, loss_total = self.train(cf_model, optimizer, epoch)
-
+            new_example, loss_total = self.cf_train(
+                cf_model,
+                cf_optimizer,
+                x=sub_feat,
+                A_x=sub_adj,
+                y_pred=y_pred,
+                target=target,
+                index=new_index,
+                **kwargs
+            )
             if new_example and loss_total < best_loss:
                 best_cf_example.append(new_example)
                 best_loss = loss_total
-        return (best_cf_example)
 
-    def train(
+        # TODO: Figure out the correct output type
+        return Explanation(best_cf_example)
+
+    def cf_train(
         self,
         cf_model: GCNSyntheticPerturb,
-        optimizer: optim.Optimizer,
-        epoch: int,
+        cf_optimizer: optim.Optimizer,
+        x: Tensor,
+        A_x: Tensor,
+        y_pred: Tensor,
+        *,
+        target: Tensor,
+        index: Optional[Union[int, Tensor]] = None,
+        **kwargs,
     ):
         r''' e@@@@@@@@@@@@@@@
             @@@""""""""""
@@ -141,39 +128,41 @@ class CFExplainer(ExplainerAlgorithm):
         /oO--000""`-OO---OO-'''
 
         cf_model.train()
-        optimizer.zero_grad()
+        cf_optimizer.zero_grad()
 
         # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
         # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
-        output = cf_model.forward(self.sub_feat, self.sub_adj) # (x, A_x)
-        output_actual, self.P = cf_model.forward_prediction(self.sub_feat) # (x)
+        output = cf_model.forward(x, A_x)
+        output_actual, self.P = cf_model.forward_prediction(x)
 
-        # Need to use new_idx from now on since sub_adj is reindexed
-        y_pred_new = torch.argmax(output[self.new_idx])
-        y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
+        #// Need to use new_idx from now on since sub_adj is reindexed
+        y_pred_new = torch.argmax(output[index])
+        y_pred_new_actual = torch.argmax(output_actual[index])
 
         # loss_pred indicator should be based on y_pred_new_actual NOT y_pred_new!
         loss_total, loss_pred, loss_graph_dist, cf_adj = cf_model.loss(
-            output[self.new_idx],
-            self.y_pred_orig,
+            output[index.item()],
+            y_pred,
             y_pred_new_actual,
         )
-        
+
         loss_total.backward()
         clip_grad_norm(cf_model.parameters(), 2.0)
-        optimizer.step()
+        cf_optimizer.step()
 
+        # TODO: This should not be in the train function
         cf_stats = []
-        if y_pred_new_actual != self.y_pred_orig:
+        if y_pred_new_actual != y_pred:
             cf_stats = [
-                self.node_idx.item(),
-                self.new_idx.item(),
+                #! self.node_idx.item(),
+                index.item(),
                 cf_adj.detach().numpy(),
-                self.sub_adj.detach().numpy(),
-                self.y_pred_orig.item(),
+                A_x.detach().numpy(),
+                y_pred.item(),
                 y_pred_new.item(),
                 y_pred_new_actual.item(),
-                # self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
+                #! self.sub_labels[index].numpy(),
+                A_x.shape[0],
                 loss_total.item(),
                 loss_pred.item(),
                 loss_graph_dist.item()
@@ -181,13 +170,12 @@ class CFExplainer(ExplainerAlgorithm):
 
         return (cf_stats, loss_total.item())
 
-
     def supports(self):
         # TODO: check values in Explainer
         explanation_type = self.explainer_config.explanation_type
         if explanation_type != ExplanationType.model:
             # logging.error(f"'{self.__class__.__name__}' only supports "
-            #               f"phenomenon explanations "
+            #               f"model explanations "
             #               f"got (`explanation_type={explanation_type.value}`)")
             return False
 
@@ -207,11 +195,45 @@ class CFExplainer(ExplainerAlgorithm):
 
         return True
 
+    def _get_neighbourhood(
+            self, x: Tensor, edge_index: Tensor, index: Tensor, num_hops=3
+        ) -> Tuple[Tensor, Tensor, Tensor]:
+        nodes, edge_subset, new_index, edge_mask = k_hop_subgraph(
+            index.item(),
+            num_hops,
+            edge_index,
+            relabel_nodes=False
+        )
 
-    # def __call__(self):
-    #     # data.x, data.edge_index, index=node_index
-    #     pass
+        # Get relabelled subset of edges
+        edge_subset_relabel = subgraph(nodes, edge_index, relabel_nodes=True)
+        # TODO: Why do we need to relabel?
+        #? print(edge_subset == edge_index[:, edge_mask])
+        #? print(edge_subset_relabel[0])
+        #? sub_adj = to_dense_adj(edge_subset).squeeze()
+        #? sub_labels = labels[nodes]
+        sub_feat = x[nodes, :]
+        sub_adj = to_dense_adj(edge_subset_relabel[0]).squeeze()
 
+        return new_index, sub_feat, sub_adj
+
+    def _initialize_cf_optimizer(
+            self, cf_model: GCNSyntheticPerturb
+        ) -> optim.Optimizer:
+        if self.optimizer == 'SGD':
+            return optim.SGD(
+                cf_model.parameters(),
+                self.lr,
+                self.n_momentum,
+                nesterov=(self.n_momentum != 0.0),
+            )
+        elif self.optimizer == 'Adadelta':
+            return optim.Adadelta(
+                cf_model.parameters(),
+                self.lr,
+            )
+        else:
+            raise ValueError('Invalid optimizer value')
 
 
 
