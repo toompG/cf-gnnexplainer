@@ -106,6 +106,15 @@ class CFExplainer(ExplainerAlgorithm):
                 best_loss = loss_total
 
         # TODO: Figure out the correct output type
+
+        # TODO: Make example communication not shit
+        print(f'node {index}: {best_cf_example == []}')
+        if 'storage' in self.coeffs and best_cf_example != []:
+            self.coeffs['storage'][0] = True
+            self.coeffs['storage'].append(best_cf_example[-1])
+        else:
+            self.coeffs['storage'][0] = False
+
         return Explanation(best_cf_example)
 
     def cf_train(
