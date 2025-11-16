@@ -1,22 +1,30 @@
 import torch
 import torch.nn.functional as F
 
-from torch_geometric.datasets import ExplainerDataset
-from torch_geometric.datasets.graph_generator import BAGraph
-from torch_geometric.explain import Explainer, GraphMaskExplainer
-from torch_geometric.utils import dense_to_sparse
 from torch_geometric.data import Data
-from utils.utils import get_neighbourhood
+from torch_geometric.explain import Explainer
+from torch_geometric.utils import dense_to_sparse
+from torch_geometric.nn import GCNConv
 
-from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
+from utils.utils import get_neighbourhood
+from cf_explanation.cf_explainer import CFExplainer
 from torch_geometric.nn import GCNConv
 from utils.utils import safe_open
+
+import argparse
+import numpy as np
 import pickle
 
 from tqdm import tqdm
 
-#TODO: Set seed
+parser = argparse.ArgumentParser()
+parser.add_argument('--seed', type=int, default=20, help='Random seed.')
+args = parser.parse_args()
 
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
+torch.cuda.manual_seed_all(args.seed)
 
 class GCN(torch.nn.Module):
     def __init__(self, num_features, num_classes):
