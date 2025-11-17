@@ -7,7 +7,7 @@ from torch_geometric.utils import dense_to_sparse
 from torch_geometric.nn import GCNConv
 
 from utils.utils import get_neighbourhood
-from cf_explanation.cf_explainer import CFExplainer
+from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
 from torch_geometric.nn import GCNConv
 from utils.utils import safe_open
 
@@ -16,15 +16,24 @@ import numpy as np
 import pickle
 
 from tqdm import tqdm
+from pathlib import Path
+
+# Get current script directory and construct path
+script_dir = Path(__file__).parent
+graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
+# Resolve to absolute path
+graph_data_path = graph_data_path.resolve()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=20, help='Random seed.')
+parser.add_argument('--dst', type=str, default='results')
 args = parser.parse_args()
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
+# torch.use_deterministic_algorithms(True)
 
 class GCN(torch.nn.Module):
     def __init__(self, num_features, num_classes):
@@ -57,7 +66,7 @@ def load_dataset(path, device):
         edge_attr=edge_attr,
         y=labels,
         num_features=10,
-        num_classes=4,
+        num_classes=len(labels.unique()),
         train_set = idx_train,
         test_set = idx_test
     )
@@ -84,27 +93,42 @@ def train_model(data, device, end=200):
 
     return model
 
+def explain_original(model, data, predictions, device):
+    test_cf_examples = []
+    for i in tqdm(data.test_set):
+        sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i),
+                                                        data.edge_index,
+                                                        3, # Magic number!
+                                                        data.x,
+                                                        data.y)
+        new_idx = node_dict[int(i)]
 
-def main():
-    # TODO support device=cuda
-    device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
+        explainer = CFExplainerOriginal(model=model,
+                                        sub_adj=sub_adj,
+                                        sub_feat=sub_feat,
+                                        n_hid=20,
+                                        dropout=0.5,
+                                        sub_labels=sub_labels,
+                                        y_pred_orig= predictions[i],
+                                        num_classes = data.num_classes,
+                                        beta=.5,
+                                        device=device)
 
-    data = load_dataset('../data/gnn_explainer/syn1.pickle', device)
+        cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
+                                       n_momentum=0.0, num_epochs=400)
 
-    model = train_model(data, device, end=1000)
-    model.eval()
+        test_cf_examples.append(cf_example)
 
-    output = model(data.x, data.edge_index)
-    predictions = output.argmax(dim=1)
-    train_accuracy = (predictions == data.y).float().mean()
-    print(f"Training accuracy: {train_accuracy:.4f}")
+    with safe_open(f"../results/{args.dst}", "wb") as f:
+        pickle.dump(test_cf_examples, f)
 
+
+def explain_new(data, model, predictions):
     write_to = [False]
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=400, lr=0.001, predictions=predictions,
-                              storage=write_to, num_classes=4),
+        algorithm=CFExplainer(epochs=400, lr=0.01, predictions=predictions,
+                              storage=write_to, num_classes=data.num_classes),
         explanation_type='model',
         edge_mask_type='object',
         model_config=dict(
@@ -115,9 +139,10 @@ def main():
     )
 
     test_cf_examples = []
-    for i in tqdm(data.test_set):
-        if data.y[i].item() == 0:
+    for i in data.test_set:
+        if predictions[i] == 0:
             continue
+        print(predictions[i])
 
         # print(f"generating CF for {i} with {predictions[i], data.y[i]}")
 
@@ -127,29 +152,33 @@ def main():
                                                         data.x,
                                                         data.y)
         new_idx = node_dict[int(i)]
-
-        # explainer = CFExplainerOriginal(model=model,
-        #                                 sub_adj=sub_adj,
-        #                                 sub_feat=sub_feat,
-        #                                 n_hid=20,
-        #                                 dropout=0.5,
-        #                                 sub_labels=sub_labels,
-        #                                 y_pred_orig= predictions[i],
-        #                                 num_classes = 2,
-        #                                 beta=.5,
-        #                                 device=device)
-
-        # cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
-        #                             n_momentum=0.0, num_epochs=200)
-
         _ = explainer(data.x, data.edge_index, index=i)
 
         if write_to[0]:
-            test_cf_examples.append([i.item(), sub_labels[new_idx]] + write_to[-1])
+            test_cf_examples.append([i.item(), sub_labels[new_idx].item()] + write_to[-1])
 
-
-    with safe_open("../results/bruh2", "wb") as f:
+        # return
+    with safe_open(f"../results/{args.dst}", "wb") as f:
         pickle.dump(test_cf_examples, f)
+
+
+def main():
+    # TODO support device=cuda
+    device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
+
+    data = load_dataset(graph_data_path, device)
+
+    model = train_model(data, device, end=1000)
+    model.eval()
+
+    output = model(data.x, data.edge_index)
+    predictions = output.argmax(dim=1)
+    train_accuracy = (predictions == data.y).float().mean()
+    print(f"Training accuracy: {train_accuracy:.4f}")
+
+    explain_new(data, model, predictions)
+    # explain_original(model, data, predictions, device)
 
 
 if __name__ == '__main__':

@@ -8,6 +8,8 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+
+from torch import Tensor
 import torch
 from torch_geometric.utils import dense_to_sparse
 from gcn import GCNSynthetic
@@ -17,11 +19,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--path', help='Filepath of CF example dataset')
 args = parser.parse_args()
 
-print(args)
-
+# TODO: inspect loss_graph_dist, it always seems to return 0.0
+header = ["node_idx", "label", "new_idx", "cf_adj", "sub_adj", "y_pred_orig",
+          "loss_graph_dist"]
 # moved node_idx and label to the front
-header = ["node_idx", "label", "new_idx", "cf_adj", "sub_adj", "y_pred_orig", "y_pred_new", "y_pred_new_actual",
-          "num_nodes", "loss_total", "loss_pred", "loss_graph_dist"]
+# header = ["node_idx", "label", "new_idx", "cf_adj", "sub_adj", "y_pred_orig", "y_pred_new", "y_pred_new_actual",
+        #   "num_nodes", "loss_total", "loss_pred", "loss_graph_dist"]
 hidden = 20
 dropout = 0.0
 
@@ -45,17 +48,18 @@ idx_test = torch.tensor(data["test_idx"])
 edge_index = dense_to_sparse(adj)
 
 norm_adj = normalize_adj(adj)
-model = GCNSynthetic(nfeat=features.shape[1], nhid=hidden, nout=hidden,
-                     nclass=len(labels.unique()), dropout=dropout)
-model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format(dataset)))
-model.eval()
-output = model(features, norm_adj)
-y_pred_orig = torch.argmax(output, dim=1)
-
+# model = GCNSynthetic(nfeat=features.shape[1], nhid=hidden, nout=hidden,
+#                      nclass=len(labels.unique()), dropout=dropout)
+# model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format(dataset)))
+# model.eval()
+# output = model(features, norm_adj)
+# y_pred_orig = torch.argmax(output, dim=1)
 
 # Load CF examples
 with open(args.path, "rb") as f:
     df = pd.DataFrame(list(pickle.load(f)), columns=header)
+
+y_pred_orig = Tensor(df["y_pred_orig"])
 
 # Add num edges
 num_edges = []
@@ -72,11 +76,10 @@ dict_ypred_orig = dict(zip(sorted(np.concatenate((idx_train.numpy(), idx_test.nu
 for i in range(len(df_motif)):
     node_idx = df_motif["node_idx"][i]
     new_idx = df_motif["new_idx"][i]
-    _, _, _, node_dict = get_neighbourhood(int(node_idx), edge_index[0], 4, features, labels)
+    _, _, _, node_dict = get_neighbourhood(int(node_idx), edge_index[0], 3, features, labels)
 
     # Confirm idx mapping is correct
     if node_dict[node_idx] == df_motif["new_idx"][i]:
-
         cf_adj = df_motif["cf_adj"][i]
         sub_adj = df_motif["sub_adj"][i]
         perturb = np.abs(cf_adj - sub_adj)
@@ -94,7 +97,11 @@ for i in range(len(df_motif)):
         # Retrieve original predictions
         perturb_nodes_orig_ypred = np.array([dict_ypred_orig[k] for k in perturb_nodes_orig_idx])
         nodes_in_motif = perturb_nodes_orig_ypred[perturb_nodes_orig_ypred != 0]
-        prop_correct = len(nodes_in_motif) / len(perturb_nodes_orig_idx)
+
+        if len(perturb_nodes_orig_idx) > 0:
+            prop_correct = len(nodes_in_motif) / len(perturb_nodes_orig_idx)
+        else:
+            prop_correct = 0
 
         accuracy.append([node_idx, new_idx, perturb_nodes_orig_idx,
                          perturb_nodes_orig_ypred, nodes_in_motif, prop_correct])

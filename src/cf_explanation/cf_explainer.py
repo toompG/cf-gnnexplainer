@@ -163,17 +163,17 @@ class CFExplainer(ExplainerAlgorithm):
         cf_stats = []
         if y_pred_new_actual != y_pred:
             cf_stats = [
-                #! self.node_idx.item(),
+                #! self.node_idx.item(), # this one is actually used
                 index.item(),
                 cf_adj.detach().numpy(),
                 A_x.detach().numpy(),
                 y_pred.item(),
-                y_pred_new.item(),
-                y_pred_new_actual.item(),
+                # y_pred_new.item(),
+                # y_pred_new_actual.item(),
                 #! self.sub_labels[index].numpy(),
-                A_x.shape[0],
-                loss_total.item(),
-                loss_pred.item(),
+                # A_x.shape[0],
+                # loss_total.item(),
+                # loss_pred.item(),
                 loss_graph_dist.item()
             ]
 
