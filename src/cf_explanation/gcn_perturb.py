@@ -20,6 +20,7 @@ class GraphConvolutionPerturb(nn.Module):
         else:
             self.register_parameter('bias', None)
 
+
     def forward(self, input, adj):
         support = torch.mm(input, self.weight)
         output = torch.mm(adj, support)
@@ -134,8 +135,9 @@ class GCNSyntheticPerturb(nn.Module):
         return F.log_softmax(x, dim=1), self.P
 
 
-    def loss(self, output, y_pred_orig, y_pred_new_actual):
-        pred_same = float(int(y_pred_new_actual) == int(y_pred_orig))
+    def  loss(self, output, y_pred_orig, y_pred_new_actual):
+        pred_same = (y_pred_new_actual == y_pred_orig).float()
+
         # Need dim >=2 for F.nll_loss to work
         output = output.unsqueeze(0)
         y_pred_orig = y_pred_orig.unsqueeze(0)
@@ -148,7 +150,7 @@ class GCNSyntheticPerturb(nn.Module):
 
         # Want negative in front to maximize loss instead of minimizing it to find CFs
         loss_pred = - F.nll_loss(output, y_pred_orig)
-        loss_graph_dist = (cf_adj != self.adj).sum() / 2
+        loss_graph_dist = sum(sum(abs(cf_adj - self.adj))) / 2      # Number of edges changed (symmetrical)
 
         # Zero-out loss_pred with pred_same if prediction flips
         loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
