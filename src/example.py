@@ -48,10 +48,10 @@ class GCN(torch.nn.Module):
         self.lin = nn.Linear(2 * n_hid + n_out, num_classes)
         self.dropout = dropout
 
-    def forward(self, x, edge_index):
-        x1 = self.conv1(x, edge_index).relu()
+    def forward(self, x, edge_index, edge_weights=None):
+        x1 = self.conv1(x, edge_index, edge_weight=edge_weights).relu()
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = self.conv2(x1, edge_index).relu()
+        x2 = self.conv2(x1, edge_index, edge_weight=edge_weights).relu()
         x2 = F.dropout(x2, p=self.dropout, training=self.training)
         x3 = self.conv3(x2, edge_index)
         x3 = F.dropout(x3, training=self.training)
@@ -137,12 +137,13 @@ def explain_original(model, data, predictions, device):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, predictions, epochs=400):
+def explain_new(data, model, predictions, beta=0.5, lr=0.1, epochs=400):
     write_to = [False]
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=epochs, lr=0.01, predictions=predictions,
-                              storage=write_to, num_classes=data.num_classes),
+        algorithm=CFExplainer(epochs=epochs, lr=lr, predictions=predictions,
+                              storage=write_to, num_classes=data.num_classes,
+                              beta=beta),
         explanation_type='model',
         edge_mask_type='object',
         model_config=dict(
@@ -206,7 +207,7 @@ def main():
     train_accuracy = (predictions == data.y).float().mean()
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, predictions, epochs=200)
+    explain_new(data, model, predictions, beta=2, lr=.3, epochs=200)
     # explain_original(model, data, predictions, device)
 
 
