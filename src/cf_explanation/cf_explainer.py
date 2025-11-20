@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch import Tensor
 from torch.nn.utils import clip_grad_norm
 from utils.utils import get_degree_matrix
-from .gcn_perturb import GCNSyntheticPerturb
+from .gcn_edge_perturb import GCNSyntheticPerturbEdgeWeight
 from utils.utils import normalize_adj
 
 from torch_geometric.explain import Explanation
@@ -29,9 +29,9 @@ class CFExplainer(ExplainerAlgorithm):
     """
     coeffs = {
         'n_hid': 20,
-        'dropout': 0.5,
+        'dropout': 0.0,
         'num_classes': 2, #TODO where to put?
-        'beta': 0.5,
+        'beta': 0.2,
     }
 
     def __init__(
@@ -65,18 +65,21 @@ class CFExplainer(ExplainerAlgorithm):
         if index is None:
             index = Tensor(range(len(x)))
 
-        new_index, sub_feat, sub_adj = self._get_neighbourhood(x, edge_index, index)
+        new_index, edge_subset, sub_feat, sub_adj = self._get_neighbourhood(x, edge_index, index)
 
         # Instantiate CF model class, load weights from original model
-        cf_model = GCNSyntheticPerturb(
+        cf_model = GCNSyntheticPerturbEdgeWeight(
             sub_feat.shape[1],
             self.coeffs['n_hid'],
             self.coeffs['n_hid'],
             self.coeffs['num_classes'],
-            sub_adj,
+            edge_subset,
             self.coeffs['dropout'],
             self.coeffs['beta'],
+            edge_additions=True
         )
+
+        self.model = model
 
         cf_model.load_state_dict(model.eval().state_dict(), strict=False)
         cf_optimizer = self._initialize_cf_optimizer(cf_model)
@@ -95,7 +98,7 @@ class CFExplainer(ExplainerAlgorithm):
                 cf_model,
                 cf_optimizer,
                 x=sub_feat,
-                A_x=sub_adj,
+                A_x=edge_subset,
                 y_pred=y_pred,
                 target=target,
                 index=new_index,
@@ -108,7 +111,7 @@ class CFExplainer(ExplainerAlgorithm):
         # TODO: Figure out the correct output type
 
         # TODO: Make example communication not shit
-        print(f'node {index}: {best_cf_example == []}')
+        print(f'node {index}: {len(best_cf_example)}')
         if 'storage' in self.coeffs and best_cf_example != []:
             self.coeffs['storage'][0] = True
             self.coeffs['storage'].append(best_cf_example[-1])
@@ -119,7 +122,7 @@ class CFExplainer(ExplainerAlgorithm):
 
     def cf_train(
         self,
-        cf_model: GCNSyntheticPerturb,
+        cf_model: GCNSyntheticPerturbEdgeWeight,
         cf_optimizer: optim.Optimizer,
         x: Tensor,
         A_x: Tensor,
@@ -141,18 +144,20 @@ class CFExplainer(ExplainerAlgorithm):
 
         # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
         # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
-        output = cf_model.forward(x, A_x)
-        output_actual, self.P = cf_model.forward_prediction(x)
+        output = cf_model.forward(x)
+        self.P = cf_model.get_binary_adjacency()
 
         #// Need to use new_idx from now on since sub_adj is reindexed
-        y_pred_new = torch.argmax(output[index])
-        y_pred_new_actual = torch.argmax(output_actual[index])
+        y_pred_real = torch.argmax(self.model(x, A_x * self.P)[index])
+
+        # assert(y_pred_real == y_pred_new_actual)
+
 
         # loss_pred indicator should be based on y_pred_new_actual NOT y_pred_new!
         loss_total, loss_pred, loss_graph_dist, cf_adj = cf_model.loss(
             output[index.item()],
             y_pred,
-            y_pred_new_actual,
+            y_pred_real,
         )
 
         loss_total.backward()
@@ -161,7 +166,7 @@ class CFExplainer(ExplainerAlgorithm):
 
         # TODO: This should not be in the train function
         cf_stats = []
-        if y_pred_new_actual != y_pred:
+        if y_pred_real != y_pred:
             cf_stats = [
                 #! self.node_idx.item(), # this one is actually used
                 index.item(),
@@ -205,13 +210,13 @@ class CFExplainer(ExplainerAlgorithm):
         return True
 
     def _get_neighbourhood(
-            self, x: Tensor, edge_index: Tensor, index: Tensor, num_hops=3
+            self, x: Tensor, edge_index: Tensor, index: Tensor, num_hops=4
         ) -> Tuple[Tensor, Tensor, Tensor]:
         nodes, edge_subset, new_index, edge_mask = k_hop_subgraph(
             index.item(),
             num_hops,
             edge_index,
-            relabel_nodes=False
+            relabel_nodes=True
         )
 
         # Get relabelled subset of edges
@@ -224,21 +229,21 @@ class CFExplainer(ExplainerAlgorithm):
         sub_feat = x[nodes, :]
         sub_adj = to_dense_adj(edge_subset_relabel[0]).squeeze()
 
-        return new_index, sub_feat, sub_adj
+        return new_index, edge_subset, sub_feat, sub_adj
 
     def _initialize_cf_optimizer(
-            self, cf_model: GCNSyntheticPerturb
+            self, cf_model: GCNSyntheticPerturbEdgeWeight
         ) -> optim.Optimizer:
         if self.optimizer == 'SGD':
             return optim.SGD(
-                cf_model.parameters(),
+                [cf_model.edge_weight_params],
                 self.lr,
                 self.n_momentum,
                 nesterov=(self.n_momentum != 0.0),
             )
         elif self.optimizer == 'Adadelta':
             return optim.Adadelta(
-                cf_model.parameters(),
+                [cf_model.edge_weight_params],
                 self.lr,
             )
         else:
@@ -270,7 +275,7 @@ class CFExplainerOriginal():
         self.device = device # device (yknow)
 
         # Instantiate CF model class, load weights from original model
-        self.cf_model = GCNSyntheticPerturb(self.sub_feat.shape[1], n_hid,
+        self.cf_model = GCNSyntheticPerturbEdgeWeight(self.sub_feat.shape[1], n_hid,
                                             n_hid, self.num_classes,
                                             self.sub_adj, dropout, beta)
 

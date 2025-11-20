@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 
 from torch_geometric.data import Data
 from torch_geometric.explain import Explainer
 from torch_geometric.utils import dense_to_sparse
 from torch_geometric.nn import GCNConv
 
-from utils.utils import get_neighbourhood
+from utils.utils import get_neighbourhood, normalize_adj
 from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
 from torch_geometric.nn import GCNConv
 from utils.utils import safe_open
@@ -17,6 +18,8 @@ import pickle
 
 from tqdm import tqdm
 from pathlib import Path
+
+from gcn import GCNSynthetic
 
 # Get current script directory and construct path
 script_dir = Path(__file__).parent
@@ -36,15 +39,23 @@ torch.cuda.manual_seed_all(args.seed)
 # torch.use_deterministic_algorithms(True)
 
 class GCN(torch.nn.Module):
-    def __init__(self, num_features, num_classes):
+    def __init__(self, num_features, num_classes, n_hid=20, n_out = 20,
+                 dropout=0.0):
         super().__init__()
-        self.conv1 = GCNConv(num_features, 20)
-        self.conv2 = GCNConv(20, num_classes)
+        self.conv1 = GCNConv(num_features, n_hid)
+        self.conv2 = GCNConv(n_hid, n_hid)
+        self.conv3 = GCNConv(n_hid, n_out)
+        self.lin = nn.Linear(2 * n_hid + n_out, num_classes)
+        self.dropout = dropout
 
     def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index).relu()
-        x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index)
+        x1 = self.conv1(x, edge_index).relu()
+        x1 = F.dropout(x1, p=self.dropout, training=self.training)
+        x2 = self.conv2(x1, edge_index).relu()
+        x2 = F.dropout(x2, p=self.dropout, training=self.training)
+        x3 = self.conv3(x2, edge_index)
+        x3 = F.dropout(x3, training=self.training)
+        x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
 
@@ -60,6 +71,8 @@ def load_dataset(path, device):
     idx_test = torch.tensor(graphdata["test_idx"])
     edge_index, edge_attr = dense_to_sparse(adj)
 
+    norm_adj = normalize_adj(adj)
+
     data = Data(
         x=features,
         edge_index=edge_index,
@@ -68,7 +81,8 @@ def load_dataset(path, device):
         num_features=10,
         num_classes=len(labels.unique()),
         train_set = idx_train,
-        test_set = idx_test
+        test_set = idx_test,
+        norm_adj = norm_adj
     )
 
     data.to(device)
@@ -107,11 +121,11 @@ def explain_original(model, data, predictions, device):
                                         sub_adj=sub_adj,
                                         sub_feat=sub_feat,
                                         n_hid=20,
-                                        dropout=0.5,
+                                        dropout=0.0,
                                         sub_labels=sub_labels,
                                         y_pred_orig= predictions[i],
                                         num_classes = data.num_classes,
-                                        beta=.5,
+                                        beta=.2,
                                         device=device)
 
         cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
@@ -123,11 +137,11 @@ def explain_original(model, data, predictions, device):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, predictions):
+def explain_new(data, model, predictions, epochs=400):
     write_to = [False]
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=400, lr=0.01, predictions=predictions,
+        algorithm=CFExplainer(epochs=epochs, lr=0.01, predictions=predictions,
                               storage=write_to, num_classes=data.num_classes),
         explanation_type='model',
         edge_mask_type='object',
@@ -139,16 +153,15 @@ def explain_new(data, model, predictions):
     )
 
     test_cf_examples = []
-    for i in data.test_set:
-        if predictions[i] == 0:
-            continue
-        print(predictions[i])
+    for i in tqdm(data.test_set):
+        # if predictions[i] == 0:
+        #     continue
 
         # print(f"generating CF for {i} with {predictions[i], data.y[i]}")
 
         _, _, sub_labels, node_dict = get_neighbourhood(int(i),
                                                         data.edge_index,
-                                                        3, # Magic number!
+                                                        4, # Magic number!
                                                         data.x,
                                                         data.y)
         new_idx = node_dict[int(i)]
@@ -169,15 +182,31 @@ def main():
 
     data = load_dataset(graph_data_path, device)
 
+    # Set up original model, get predictions
+    # model = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+    #                     nclass=len(data.y.unique()), dropout=0)
+
+    # model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format('syn1')))
+    # model.eval()
+    # output = model(data.x, data.norm_adj)
+    # y_pred_orig = torch.argmax(output, dim=1)
+    # print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
+    # print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
+
     model = train_model(data, device, end=1000)
     model.eval()
 
     output = model(data.x, data.edge_index)
+    y_pred_orig = torch.argmax(output, dim=1)
+    print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
+    print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
+
+    # output = model(data.x, data.edge_index)
     predictions = output.argmax(dim=1)
     train_accuracy = (predictions == data.y).float().mean()
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, predictions)
+    explain_new(data, model, predictions, epochs=200)
     # explain_original(model, data, predictions, device)
 
 
