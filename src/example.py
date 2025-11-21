@@ -58,6 +58,21 @@ class GCN(torch.nn.Module):
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
+class SmolGCN(torch.nn.Module):
+    def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
+        super().__init__()
+        self.conv1 = GCNConv(num_features, n_hid)
+        self.conv2 = GCNConv(n_hid, num_classes)
+        self.dropout = dropout
+
+    def forward(self, x, edge_index, edge_weights=None):
+        x1 = self.conv1(x, edge_index, edge_weight=edge_weights).relu()
+        x1 = F.dropout(x1, p=self.dropout, training=self.training)
+        x2 = self.conv2(x1, edge_index, edge_weight=edge_weights).relu()
+        # x2 = F.dropout(x2, p=self.dropout, training=self.training)
+
+        return F.log_softmax(x2, dim=1)
+
 
 def load_dataset(path, device):
     with open(path, 'rb') as f:
@@ -181,7 +196,7 @@ def main():
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, beta=.5, lr=.6, epochs=200)
+    explain_new(data, model, beta=.5, lr=.1, epochs=600)
     # explain_original(model, data, predictions, device)
 
 

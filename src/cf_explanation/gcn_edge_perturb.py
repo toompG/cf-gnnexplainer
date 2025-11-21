@@ -11,7 +11,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
     for counterfactual explanations
     """
     def __init__(self, model, index, x, edge_index, beta=.5, edge_additions=False):
-        super(GCNSyntheticPerturbEdgeWeight, self).__init__()
+        super().__init__()
         self.model = model
         self.edge_index = edge_index
         self.index = index
@@ -31,7 +31,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=.5, noise=0.0):
+    def reset_parameters(self, eps=.2, noise=0.0):
         """Initialize edge weight parameters"""
         with torch.no_grad():
             if self.edge_additions:
@@ -47,7 +47,6 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         """
         return self.model(self.x, self.edge_index,
                           edge_weights=torch.sigmoid(self.edge_weight_params))[self.index]
-
 
     def forward_hard(self):
         """
