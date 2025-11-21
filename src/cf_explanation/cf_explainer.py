@@ -28,16 +28,14 @@ class CFExplainer(ExplainerAlgorithm):
 
     """
     coeffs = {
-        'n_hid': 20,
         'dropout': 0.0,
         'num_layers': None,
-        'num_classes': 2, #TODO where to put?
-        'beta': 1,
+        'beta': .5,
     }
 
     def __init__(
         self,
-        predictions: Tensor,
+        # predictions: Tensor,
         epochs: int = 200,
         lr: float = 0.001,
         optimizer: str = 'SGD',
@@ -45,7 +43,7 @@ class CFExplainer(ExplainerAlgorithm):
         **kwargs,
     ):
         super().__init__()
-        self.predictions = predictions
+        # self.predictions = predictions
         self.epochs = epochs
         self.lr = lr
         self.optimizer = optimizer
@@ -66,15 +64,9 @@ class CFExplainer(ExplainerAlgorithm):
         if index is None:
             index = Tensor(range(len(x)))
 
+        model.eval()
+        # TODO: subgraph for performance reasons
 
-        # if self.coeffs['num_layers'] is not None:
-        # # new_index, edge_subset, sub_feat, sub_adj = self._get_neighbourhood(x, edge_index, index)
-        #     nodes, edge_subset, mapping, mask = k_hop_subgraph(index,
-        #                                                        self.coeffs['num_layers'],
-        #                                                        edge_index,
-        #                                                        relabel_nodes=True)
-
-        # Instantiate CF model class, load weights from original model
         cf_model = GCNSyntheticPerturbEdgeWeight(
             model,
             index,
@@ -84,17 +76,9 @@ class CFExplainer(ExplainerAlgorithm):
             edge_additions=True
         )
 
-        self.prediction = self.predictions[index]
+        self.prediction = torch.argmax(model(x, edge_index)[index])
 
-
-        # cf_model.load_state_dict(model.eval().state_dict(), strict=False)
         cf_optimizer = self._initialize_cf_optimizer(cf_model)
-        # y_pred = self.predictions[index]
-
-        # Freeze weights from original model in cf_model
-        # for name, param in cf_model.named_parameters():
-        #     if name.endswith("weight") or name.endswith("bias"):
-        #         param.requires_grad = False
 
         best_cf_example = []
         best_loss = np.inf
@@ -111,12 +95,15 @@ class CFExplainer(ExplainerAlgorithm):
                 # **kwargs
             )
 
-
-
             if new_example and loss_total < best_loss:
+                assert(new_example[1] != 0)
                 best_cf_example.append(new_example)
                 best_loss = loss_total
 
+                # skip when optimal cf found
+                if new_example[1] == 1.:
+                    break
+                break
         # TODO: Figure out the correct output type
 
         # TODO: Make example communication not shit

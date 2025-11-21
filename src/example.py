@@ -39,8 +39,7 @@ torch.cuda.manual_seed_all(args.seed)
 # torch.use_deterministic_algorithms(True)
 
 class GCN(torch.nn.Module):
-    def __init__(self, num_features, num_classes, n_hid=20, n_out = 20,
-                 dropout=0.0):
+    def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
         super().__init__()
         self.conv1 = GCNConv(num_features, n_hid)
         self.conv2 = GCNConv(n_hid, n_hid)
@@ -54,7 +53,8 @@ class GCN(torch.nn.Module):
         x2 = self.conv2(x1, edge_index, edge_weight=edge_weights).relu()
         x2 = F.dropout(x2, p=self.dropout, training=self.training)
         x3 = self.conv3(x2, edge_index)
-        x3 = F.dropout(x3, training=self.training)
+        x3 = F.dropout(x3, p=self.dropout, training=self.training)
+
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
@@ -137,12 +137,12 @@ def explain_original(model, data, predictions, device):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, predictions, beta=0.5, lr=0.1, epochs=400):
+def explain_new(data, model, beta=0.5, lr=0.1, epochs=400):
     write_to = [False]
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=epochs, lr=lr, predictions=predictions,
-                              storage=write_to, num_classes=data.num_classes,
+        algorithm=CFExplainer(epochs=epochs, lr=lr,
+                              storage=write_to,
                               beta=beta),
         explanation_type='model',
         edge_mask_type='object',
@@ -155,23 +155,11 @@ def explain_new(data, model, predictions, beta=0.5, lr=0.1, epochs=400):
 
     test_cf_examples = []
     for i in tqdm(data.test_set):
-        # if predictions[i] == 0:
-        #     continue
-
-        # print(f"generating CF for {i} with {predictions[i], data.y[i]}")
-
-        _, _, sub_labels, node_dict = get_neighbourhood(int(i),
-                                                        data.edge_index,
-                                                        4, # Magic number!
-                                                        data.x,
-                                                        data.y)
-        new_idx = node_dict[int(i)]
         _ = explainer(data.x, data.edge_index, index=i)
 
         if write_to[0]:
-            test_cf_examples.append([i.item(), sub_labels[new_idx].item()] + write_to[-1])
+            test_cf_examples.append([i.item()] + write_to[-1])
 
-        # return
     with safe_open(f"../results/{args.dst}", "wb") as f:
         pickle.dump(test_cf_examples, f)
 
@@ -182,32 +170,18 @@ def main():
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
     data = load_dataset(graph_data_path, device)
-
-    # Set up original model, get predictions
-    # model = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
-    #                     nclass=len(data.y.unique()), dropout=0)
-
-    # model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format('syn1')))
-    # model.eval()
-    # output = model(data.x, data.norm_adj)
-    # y_pred_orig = torch.argmax(output, dim=1)
-    # print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
-    # print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
-
     model = train_model(data, device, end=1000)
     model.eval()
 
     output = model(data.x, data.edge_index)
     y_pred_orig = torch.argmax(output, dim=1)
-    print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
-    print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
-
-    # output = model(data.x, data.edge_index)
     predictions = output.argmax(dim=1)
     train_accuracy = (predictions == data.y).float().mean()
+    print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
+    print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, predictions, beta=2, lr=.3, epochs=200)
+    explain_new(data, model, beta=.5, lr=.6, epochs=200)
     # explain_original(model, data, predictions, device)
 
 

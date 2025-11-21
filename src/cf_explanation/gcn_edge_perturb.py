@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -32,7 +31,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=.1):
+    def reset_parameters(self, eps=.5, noise=0.0):
         """Initialize edge weight parameters"""
         with torch.no_grad():
             if self.edge_additions:
@@ -49,7 +48,6 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         return self.model(self.x, self.edge_index,
                           edge_weights=torch.sigmoid(self.edge_weight_params))[self.index]
 
-        # print(self.edge_weight_params[:20])
 
     def forward_hard(self):
         """
@@ -58,9 +56,10 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
 
         # Threshold edge weights at 0.5
         edge_weights_soft = torch.sigmoid(self.edge_weight_params)
-        edge_mask = (edge_weights_soft >= 0.5)
+        self.edge_mask = (edge_weights_soft >= 0.5)
+        self.masked_edge_index = self.edge_index[:, self.edge_mask]
 
-        return self.model(self.x, self.edge_index * edge_mask)[self.index]
+        return self.model(self.x, self.masked_edge_index)[self.index]
 
     def loss(self, output, y_new):
         pred_same = float(y_new == self.original_class)
@@ -70,15 +69,12 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         y_pred_orig = self.original_class.unsqueeze(0)
 
         # Get current edge weights
-        edge_weights_soft = torch.sigmoid(self.edge_weight_params)
-        edge_mask = (edge_weights_soft >= 0.5).float()
-
-        loss_graph_dist = (1.0 - edge_mask).sum()
+        loss_graph_dist = (~self.edge_mask).sum().float()  # Count removed edges
 
         # Prediction loss (negative to maximize distance from original prediction)
         loss_pred = -F.nll_loss(output, y_pred_orig)
 
         # Total loss: only apply pred_same when prediction changes
         loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
-        # print(f'{float(loss_total):.2f}')
-        return loss_total, pred_same, loss_graph_dist, edge_mask
+
+        return loss_total, pred_same, loss_graph_dist, self.edge_mask
