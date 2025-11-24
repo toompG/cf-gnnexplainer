@@ -112,7 +112,14 @@ class CFExplainer(ExplainerAlgorithm):
             self.coeffs['storage'][0] = True
             self.coeffs['storage'].append(best_cf_example[-1])
         else:
-            self.coeffs['storage'][0] = False
+            self.coeffs['storage'][0] = True
+            result = [self.prediction.item(),
+                      float('nan'),
+                      np.zeros(edge_index.shape[1], dtype=bool)
+            ]
+            self.coeffs['storage'].append(result)
+
+
 
         return Explanation(best_cf_example)
 
@@ -162,20 +169,9 @@ class CFExplainer(ExplainerAlgorithm):
         cf_stats = []
         if pred_same == 0.0:
             cf_stats = [
-                #! self.node_idx.item(), # this one is actually used
-                # index.item(),
-                cf_adj.detach().numpy(),
-                # A_x.detach().numpy(),
-                # y_pred.item(),
-                # y_pred_new.item(),
-                # y_pred_new_actual.item(),
-                #! self.sub_labels[index].numpy(),
-                # A_x.shape[0],
-                # loss_total.item(),
-                # loss_pred.item(),
+                y_new.item(),
                 loss_graph_dist.item(),
-                y_new,
-                self.prediction
+                cf_adj.detach().numpy()
             ]
 
         return (cf_stats, loss_total.item())

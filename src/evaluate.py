@@ -2,121 +2,63 @@ from __future__ import division
 from __future__ import print_function
 import sys
 sys.path.append('../../')
-import json
 import argparse
 import numpy as np
-import os
 import pandas as pd
-import pickle
 
-from torch import Tensor
 import torch
-from torch_geometric.utils import dense_to_sparse
-from gcn import GCNSynthetic
-from utils.utils import normalize_adj, get_neighbourhood
+
+from example import load_dataset
+from pathlib import Path
+
+from torch_geometric.utils import k_hop_subgraph, mask_select
+
+device = 'cpu'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', help='Filepath of CF example dataset')
+parser.add_argument('--dst', type=str, default='results')
 args = parser.parse_args()
 
-# TODO: inspect loss_graph_dist, it always seems to return 0.0
-header = ["node_idx", "label", "new_idx", "cf_adj", "sub_adj", "y_pred_orig",
-          "loss_graph_dist"]
-# moved node_idx and label to the front
-# header = ["node_idx", "label", "new_idx", "cf_adj", "sub_adj", "y_pred_orig", "y_pred_new", "y_pred_new_actual",
-        #   "num_nodes", "loss_total", "loss_pred", "loss_graph_dist"]
-hidden = 20
-dropout = 0.0
+# TODO: support different datasets
+# TODO: think about subgraph cf method
 
-# if "syn4" in args.path:
-#     dataset = "syn4"
-# elif "syn5" in args.path:
-#     dataset = "syn5"
-# elif "syn1" in args.path:
-#     dataset = "syn1"
+# Load original graph
+script_dir = Path(__file__).parent
+graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
+graph_data_path = graph_data_path.resolve()
+data = load_dataset(graph_data_path, device)
 
-dataset="syn1"
+with open(f'../results/{args.dst}', "rb") as f:
+    df = pd.read_pickle(f)
 
-with open("../data/gnn_explainer/{}.pickle".format(dataset), "rb") as f:
-    data = pickle.load(f)
+# Find subgraph size for fidelity
+df['subgraph_size'] = [(k_hop_subgraph(i, 4, data.edge_index)[1]).shape[1] for i in df['node']]
 
-adj = torch.Tensor(data["adj"]).squeeze()  # Does not include self loops
-features = torch.Tensor(data["feat"]).squeeze()
-labels = torch.tensor(data["labels"]).squeeze()
-idx_train = torch.tensor(data["train_idx"])
-idx_test = torch.tensor(data["test_idx"])
-edge_index = dense_to_sparse(adj)
+# Find edges between motif nodes
+motif_edge_mask = torch.tensor([data.y[i] > 0 and data.y[j] > 0
+                                for i, j in data.edge_index.T])
+motif_edges = mask_select(data.edge_index, 1, motif_edge_mask)
+motif_edges_set = set((i.item(), j.item()) for i, j in motif_edges.T)
 
-norm_adj = normalize_adj(adj)
-# model = GCNSynthetic(nfeat=features.shape[1], nhid=hidden, nout=hidden,
-#                      nclass=len(labels.unique()), dropout=dropout)
-# model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format(dataset)))
-# model.eval()
-# output = model(features, norm_adj)
-# y_pred_orig = torch.argmax(output, dim=1)
+# Filter out nodes with label 0
+df_motif = df[df["label"] != 0].reset_index(drop=True)
 
-# Load CF examples
-with open(args.path, "rb") as f:
-    df = pd.DataFrame(list(pickle.load(f)), columns=header)
-
-y_pred_orig = Tensor(df["y_pred_orig"])
-
-# Add num edges
-num_edges = []
-for i in df.index:
-    num_edges.append(sum(sum(df["sub_adj"][i])) / 2)
-df["num_edges"] = num_edges
-
-
-# For accuracy, only look at motif nodes
-df_motif = df[df["y_pred_orig"] != 0].reset_index(drop=True)
+# Accuracy defined as proportion of removed edges that were originally between motif nodes.
+#! Accuracy currently lower because nodes w/o CFs get proportion of all edges in network.
+#! Filtering for examples yields accuracy of 1 when explaining original model.
 accuracy = []
-# Get original predictions
-dict_ypred_orig = dict(zip(sorted(np.concatenate((idx_train.numpy(), idx_test.numpy()))), y_pred_orig.numpy()))
 for i in range(len(df_motif)):
-    node_idx = df_motif["node_idx"][i]
-    new_idx = df_motif["new_idx"][i]
-    _, _, _, node_dict = get_neighbourhood(int(node_idx), edge_index[0], 3, features, labels)
+    cf_edges = mask_select(data.edge_index, 1, ~torch.tensor(df_motif['cf_mask'][i]))
 
-    # Confirm idx mapping is correct
-    if node_dict[node_idx] == df_motif["new_idx"][i]:
-        cf_adj = df_motif["cf_adj"][i]
-        sub_adj = df_motif["sub_adj"][i]
-        perturb = np.abs(cf_adj - sub_adj)
-        perturb_edges = np.nonzero(perturb)  # Edge indices
+    overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set))
+    accuracy.append(overlap_count / cf_edges.shape[1])
 
-        nodes_involved = np.unique(np.concatenate((perturb_edges[0], perturb_edges[1]), axis=0))
-        perturb_nodes = nodes_involved[nodes_involved != new_idx]  # Remove original node
+df_motif['accuracy'] = accuracy
+# df_motif = df_motif.dropna()
+cfs = df.dropna()
 
-        # Retrieve original node idxs for original predictions
-        perturb_nodes_orig_idx = []
-        for j in perturb_nodes:
-            perturb_nodes_orig_idx.append([key for (key, value) in node_dict.items() if value == j])
-        perturb_nodes_orig_idx = np.array(perturb_nodes_orig_idx).flatten()
-
-        # Retrieve original predictions
-        perturb_nodes_orig_ypred = np.array([dict_ypred_orig[k] for k in perturb_nodes_orig_idx])
-        nodes_in_motif = perturb_nodes_orig_ypred[perturb_nodes_orig_ypred != 0]
-
-        if len(perturb_nodes_orig_idx) > 0:
-            prop_correct = len(nodes_in_motif) / len(perturb_nodes_orig_idx)
-        else:
-            prop_correct = 0
-
-        accuracy.append([node_idx, new_idx, perturb_nodes_orig_idx,
-                         perturb_nodes_orig_ypred, nodes_in_motif, prop_correct])
-
-df_accuracy = pd.DataFrame(accuracy, columns=["node_idx", "new_idx", "perturb_nodes_orig_idx",
-                                              "perturb_nodes_orig_ypred", "nodes_in_motif", "prop_correct"])
-
-
-
-print(args.path)
-print("Num cf examples found: {}/{}".format(len(df), len(idx_test)))
-print("Avg fidelity: {}".format(1 - len(df) / len(idx_test)))
-print("Average graph distance: {}, std: {}".format(np.mean(df["loss_graph_dist"]), np.std(df["loss_graph_dist"])))
-print("Average sparsity: {}, std: {}".format(np.mean(1 - df["loss_graph_dist"] / df["num_edges"]), np.std(1 - df["loss_graph_dist"] / df["num_edges"])))
-print("Accuracy", np.mean(df_accuracy["prop_correct"]), np.std(df_accuracy["prop_correct"]))
-print(" ")
-print("***************************************************************")
-print(" ")
+print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes\n')
+print(f'Fidelity: {1 - len(cfs) / len(data.test_set):.3f}')
+print(f'Distance: {cfs["distance"].mean():.3f}, std: {cfs["distance"].std():.3f}')
+print(f'Sparsity: {np.mean(1 - df["distance"] / df["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
+print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')

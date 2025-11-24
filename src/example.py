@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import pandas as pd
 
 from torch_geometric.data import Data
 from torch_geometric.explain import Explainer
@@ -24,7 +25,6 @@ from gcn import GCNSynthetic
 # Get current script directory and construct path
 script_dir = Path(__file__).parent
 graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
-# Resolve to absolute path
 graph_data_path = graph_data_path.resolve()
 
 parser = argparse.ArgumentParser()
@@ -37,6 +37,9 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 # torch.use_deterministic_algorithms(True)
+
+columns = ['node', 'label', 'prediction', 'cf_prediction',
+           'distance', 'cf_mask']
 
 class GCN(torch.nn.Module):
     def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
@@ -122,6 +125,7 @@ def train_model(data, device, end=200):
 
     return model
 
+
 def explain_original(model, data, predictions, device):
     test_cf_examples = []
     for i in tqdm(data.test_set):
@@ -152,8 +156,13 @@ def explain_original(model, data, predictions, device):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400):
+def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400, stop=None):
+    if stop is None:
+        stop = len(data.test_set)
+
     write_to = [False]
+
+    predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
     explainer = Explainer(
         model=model,
         algorithm=CFExplainer(epochs=epochs, lr=lr,
@@ -169,14 +178,18 @@ def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400):
     )
 
     test_cf_examples = []
-    for i in tqdm(data.test_set):
+    for n, i in tqdm(list(enumerate(data.test_set))):
+        if n == stop:
+            break
+
         _ = explainer(data.x, data.edge_index, index=i)
 
         if write_to[0]:
-            test_cf_examples.append([i.item()] + write_to[-1])
+            test_cf_examples.append([i.item(), data.y[i].item(),
+                                     predictions[i].item()] + write_to[-1])
 
-    with safe_open(f"../results/{dst}", "wb") as f:
-        pickle.dump(test_cf_examples, f)
+    df = pd.DataFrame(test_cf_examples, columns=columns)
+    df.to_pickle(f"../results/{dst}.pkl")
 
 
 def main():
