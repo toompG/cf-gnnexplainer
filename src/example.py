@@ -152,7 +152,7 @@ def explain_original(model, data, predictions, device):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, beta=0.5, lr=0.1, epochs=400):
+def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400):
     write_to = [False]
     explainer = Explainer(
         model=model,
@@ -175,7 +175,7 @@ def explain_new(data, model, beta=0.5, lr=0.1, epochs=400):
         if write_to[0]:
             test_cf_examples.append([i.item()] + write_to[-1])
 
-    with safe_open(f"../results/{args.dst}", "wb") as f:
+    with safe_open(f"../results/{dst}", "wb") as f:
         pickle.dump(test_cf_examples, f)
 
 
