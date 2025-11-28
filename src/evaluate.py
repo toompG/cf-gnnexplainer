@@ -1,7 +1,3 @@
-from __future__ import division
-from __future__ import print_function
-import sys
-sys.path.append('../../')
 import argparse
 import numpy as np
 import pandas as pd
@@ -16,7 +12,8 @@ from torch_geometric.utils import k_hop_subgraph, mask_select
 device = 'cpu'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dst', type=str, default='results')
+parser.add_argument('--dst', type=str, default='results.pkl')
+parser.add_argument('--exp', type=str, default='syn1')
 args = parser.parse_args()
 
 # TODO: support different datasets
@@ -24,7 +21,7 @@ args = parser.parse_args()
 
 # Load original graph
 script_dir = Path(__file__).parent
-graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
+graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
 graph_data_path = graph_data_path.resolve()
 data = load_dataset(graph_data_path, device)
 
@@ -53,12 +50,23 @@ for i in range(len(df_motif)):
     overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set))
     accuracy.append(overlap_count / cf_edges.shape[1])
 
+    if accuracy[-1] < 1:
+        print(cf_edges)
+        print(df_motif.iloc[i])
+
 df_motif['accuracy'] = accuracy
 # df_motif = df_motif.dropna()
 cfs = df.dropna()
 
-print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes\n')
+print(f'{args.exp} tested at {args.dst}')
+print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes')
 print(f'Fidelity: {1 - len(cfs) / len(data.test_set):.3f}')
 print(f'Distance: {cfs["distance"].mean():.3f}, std: {cfs["distance"].std():.3f}')
-print(f'Sparsity: {np.mean(1 - df["distance"] / df["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
+print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
 print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
+print('')
+df_motif = df_motif.dropna()
+print(f'Distance: {df_motif["distance"].mean():.3f}, std: {df_motif["distance"].std():.3f}')
+print(f'Sparsity: {np.mean(1 - df_motif["distance"] / df_motif["subgraph_size"]):.3f}, std: {np.std(1 - df_motif["distance"] / df_motif["subgraph_size"]):.3f}')
+print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
+print('')

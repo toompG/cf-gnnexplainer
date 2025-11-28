@@ -23,19 +23,7 @@ from pathlib import Path
 from gcn import GCNSynthetic
 
 # Get current script directory and construct path
-script_dir = Path(__file__).parent
-graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
-graph_data_path = graph_data_path.resolve()
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--seed', type=int, default=20, help='Random seed.')
-parser.add_argument('--dst', type=str, default='results')
-args = parser.parse_args()
-
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
-torch.cuda.manual_seed_all(args.seed)
 # torch.use_deterministic_algorithms(True)
 
 columns = ['node', 'label', 'prediction', 'cf_prediction',
@@ -109,7 +97,7 @@ def load_dataset(path, device):
 
 def train_model(data, device, end=200):
     ''' Train GCN model '''
-    model = GCN(data.num_features, data.num_classes).to(device)
+    model = SmolGCN(data.num_features, data.num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=.001)
 
     train_mask = torch.zeros(data.num_nodes , dtype=torch.bool, device=device)
@@ -126,7 +114,7 @@ def train_model(data, device, end=200):
     return model
 
 
-def explain_original(model, data, predictions, device):
+def explain_original(model, data, predictions, device, dst='results'):
     test_cf_examples = []
     for i in tqdm(data.test_set):
         sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i),
@@ -152,7 +140,7 @@ def explain_original(model, data, predictions, device):
 
         test_cf_examples.append(cf_example)
 
-    with safe_open(f"../results/{args.dst}", "wb") as f:
+    with safe_open(f"../results/{dst}", "wb") as f:
         pickle.dump(test_cf_examples, f)
 
 
@@ -193,12 +181,24 @@ def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400, stop=N
 
 
 def main():
-    # TODO support device=cuda
+    script_dir = Path(__file__).parent
+    graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
+    graph_data_path = graph_data_path.resolve()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=20, help='Random seed.')
+    parser.add_argument('--dst', type=str, default='results')
+    args = parser.parse_args()
+
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)   # TODO support device=cuda
     device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
     data = load_dataset(graph_data_path, device)
-    model = train_model(data, device, end=1000)
+    model = train_model(data, device, end=500)
     model.eval()
 
     output = model(data.x, data.edge_index)
@@ -209,7 +209,7 @@ def main():
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, beta=.5, lr=.1, epochs=600)
+    explain_new(data, model, beta=.5, lr=.1, epochs=100)
     # explain_original(model, data, predictions, device)
 
 

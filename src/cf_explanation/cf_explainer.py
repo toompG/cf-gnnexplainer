@@ -82,6 +82,7 @@ class CFExplainer(ExplainerAlgorithm):
 
         best_cf_example = []
         best_loss = np.inf
+        best_distance = np.inf
 
         for epoch in range(self.epochs):
             new_example, loss_total = self.cf_train(
@@ -95,10 +96,10 @@ class CFExplainer(ExplainerAlgorithm):
                 # **kwargs
             )
 
-            if new_example and loss_total < best_loss:
+            if new_example and new_example[1] < best_distance:
                 assert(new_example[1] != 0)
                 best_cf_example.append(new_example)
-                best_loss = loss_total
+                best_distance = new_example[1]
 
                 # skip when optimal cf found
                 if new_example[1] == 1.:
@@ -167,7 +168,7 @@ class CFExplainer(ExplainerAlgorithm):
 
         # TODO: This should not be in the train function
         cf_stats = []
-        if pred_same == 0.0:
+        if pred_same == 0:
             cf_stats = [
                 y_new.item(),
                 loss_graph_dist.item(),

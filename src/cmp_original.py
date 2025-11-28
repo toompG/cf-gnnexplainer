@@ -5,15 +5,23 @@ from gcn import GCNSynthetic
 from utils.utils import *
 from torch_geometric.utils import to_dense_adj
 from cf_explanation.cf_explainer import CFExplainer
+from functools import lru_cache
 
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
+import argparse
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--exp', type=str, default='syn1')
+parser.add_argument('--dst', type=str, default='results')
+parser.add_argument('--lr', type=float, default=.1)
+parser.add_argument('--seed', type=int, default=20)
+
+args = parser.parse_args()
 
 script_dir = Path(__file__).parent
-graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
-
-
+graph_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
 
 
 def edge_index2norm_adj(edge_index, edge_weights=None, num_nodes=None):
@@ -49,39 +57,38 @@ class WrappedOriginalGCN(torch.nn.Module):
         super().__init__()
         self.submodel = submodel
         self.adj_norm = None
+        self.edge_cache = {}
 
     def forward(self, x, edge_index, edge_weights=None):
         num_nodes = x.shape[0]
 
-        # if edge_weights is None:
-        #     if self.adj_norm is None:
-        #         self.adj_norm = edge_index2norm_adj(edge_index)
-        #     return self.submodel(x, self.adj_norm)
+        if edge_weights is None:
+            # print(tuple(edge_index))
+            if edge_index in self.edge_cache:
+                print('cache hit')
+                return self.edge_cache[edge_index]
+            result = self.submodel(x, edge_index2norm_adj(edge_index,
+                                                          num_nodes=num_nodes))
+            self.edge_cache[edge_index] = result
+            return result
 
-        # Convert to normalized adjacency matrix
-        norm_adj = edge_index2norm_adj(
-            edge_index,
-            edge_weights,
-            num_nodes
-        )
-        # print(norm_adj)
-        # if edge_weights is not None:
-        #     index, weight = gcn_norm(edge_index, edge_weights)
-        #     print(torch.sum(weight - norm_adj[*index]))
-
-        return self.submodel(x, norm_adj)
+        return self.submodel(x, edge_index2norm_adj(edge_index, edge_weights,
+                                                    num_nodes)
+)
 
 
 def main():
     device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
-    data = load_dataset(graph_data_path, device)
+    data = load_dataset(graph_path, device)
+    print(data.y)
 
+    print(len(data.y.unique()))
     submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
                             nclass=len(data.y.unique()), dropout=0)
 
-    submodel.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format('syn1')))
+    submodel.load_state_dict(torch.load(model_path))
     submodel.eval()
 
     model = WrappedOriginalGCN(submodel).eval()
@@ -94,7 +101,6 @@ def main():
     y_pred_orig = torch.argmax(output, dim=1)
     y_pred_orig_real = torch.argmax(output_real, dim=1)
 
-
     train_accuracy = (y_pred_orig == data.y).float().mean()
     train_accuracy_real = (y_pred_orig_real == data.y).float().mean()
 
@@ -103,7 +109,7 @@ def main():
 
     #TODO: test difference for non-zero edge_weights
 
-    explain_new(data, model, dst='original_model', beta=.5, lr=.1, epochs=200)
+    explain_new(data, model, dst=args.dst, beta=2, lr=args.lr, epochs=500)
 
 
 if __name__ == '__main__':
