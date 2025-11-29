@@ -10,7 +10,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
     3-layer GCN using PyTorch Geometric's GCNConv with learnable edge weights
     for counterfactual explanations
     """
-    def __init__(self, model, index, x, edge_index, beta=.5, edge_additions=False):
+    def __init__(self, model, index, x, edge_index, beta=.5):
         super().__init__()
         self.model = model
         self.edge_index = edge_index
@@ -18,28 +18,18 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.x = x
         self.beta = beta
 
-        self.edge_additions = edge_additions
-
         self.original_class = torch.argmax(model(x, edge_index)[index])
 
         # Initialize edge weight parameters
-        if self.edge_additions:
-            # Start from zeros, will learn to add edges
-            self.edge_weight_params = Parameter(torch.zeros(edge_index.shape[1]))
-        else:
-            # Start from ones, will learn to remove edges
-            self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
+        self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=.2, noise=0.0):
+    def reset_parameters(self, eps=1., noise=0.):
         """Initialize edge weight parameters"""
         with torch.no_grad():
-            if self.edge_additions:
-                # Start slightly below 0 for additions
-                self.edge_weight_params.data.fill_(eps)
-            else:
-                # Start slightly below 1 for deletions
-                self.edge_weight_params.data.fill_(1.0 - eps)
+            self.edge_weight_params.data.fill_(eps)
+            if noise > 0.:
+                self.edge_weight_params += torch.rand_like(self.edge_weight_params) * noise
 
     def forward(self):
         """
@@ -77,3 +67,27 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
 
         return loss_total, pred_same, loss_graph_dist, self.edge_mask
+
+    def get_weights(self):
+        return self.edge_weight_params
+
+    def compute_edge_importance_gradients(self, num_samples=5, eps=1.0, noise=0.0):
+        """
+        Measure average gradient change over multiple samples
+        """
+        importance_scores = torch.zeros_like(self.edge_weight_params)
+
+        for _ in range(num_samples):
+            self.reset_parameters(eps=eps, noise=noise)
+
+            # Forward pass
+            output = self.forward()
+            self.edge_mask = torch.ones_like(self.edge_weight_params, dtype=bool)
+            loss, _, _, _ = self.loss(output, self.original_class)
+
+            self.zero_grad()
+            loss.backward()
+
+            importance_scores += torch.abs(self.edge_weight_params.grad)
+
+        return importance_scores / num_samples

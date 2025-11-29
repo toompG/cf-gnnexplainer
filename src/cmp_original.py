@@ -4,8 +4,11 @@ from pathlib import Path
 from gcn import GCNSynthetic
 from utils.utils import *
 from torch_geometric.utils import to_dense_adj
-from cf_explanation.cf_explainer import CFExplainer
 from functools import lru_cache
+
+from cf_explanation.cf_explainer import CFExplainer
+from cf_explanation.cf_greed import GreedyCFExplainer
+from cf_explanation.cf_bruteforce import BFCFExplainer
 
 from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
@@ -16,8 +19,19 @@ parser.add_argument('--exp', type=str, default='syn1')
 parser.add_argument('--dst', type=str, default='results')
 parser.add_argument('--lr', type=float, default=.1)
 parser.add_argument('--seed', type=int, default=20)
+parser.add_argument('--cf', type=str, default='cf')
 
 args = parser.parse_args()
+
+if args.cf == 'cf':
+    cf_model = CFExplainer
+elif args.cf == 'greedy':
+    cf_model = GreedyCFExplainer
+elif args.cf == 'bf':
+    cf_model = BFCFExplainer
+else:
+    raise AttributeError('Incorrect cf specified, use cf, greedy or bf')
+
 
 script_dir = Path(__file__).parent
 graph_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
@@ -62,15 +76,15 @@ class WrappedOriginalGCN(torch.nn.Module):
     def forward(self, x, edge_index, edge_weights=None):
         num_nodes = x.shape[0]
 
-        if edge_weights is None:
-            # print(tuple(edge_index))
-            if edge_index in self.edge_cache:
-                print('cache hit')
-                return self.edge_cache[edge_index]
-            result = self.submodel(x, edge_index2norm_adj(edge_index,
-                                                          num_nodes=num_nodes))
-            self.edge_cache[edge_index] = result
-            return result
+        # if edge_weights is None:
+        #     # print(tuple(edge_index))
+        #     if edge_index in self.edge_cache:
+        #         print('cache hit')
+        #         return self.edge_cache[edge_index]
+        #     result = self.submodel(x, edge_index2norm_adj(edge_index,
+        #                                                   num_nodes=num_nodes))
+        #     self.edge_cache[edge_index] = result
+        #     return result
 
         return self.submodel(x, edge_index2norm_adj(edge_index, edge_weights,
                                                     num_nodes)
@@ -109,7 +123,7 @@ def main():
 
     #TODO: test difference for non-zero edge_weights
 
-    explain_new(data, model, dst=args.dst, beta=2, lr=args.lr, epochs=500)
+    explain_new(data, model, cf_model=cf_model, dst=args.dst, beta=2, lr=args.lr, epochs=500)
 
 
 if __name__ == '__main__':

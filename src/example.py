@@ -10,6 +10,8 @@ from torch_geometric.nn import GCNConv
 
 from utils.utils import get_neighbourhood, normalize_adj
 from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
+from cf_explanation.cf_greed import GreedyCFExplainer
+from cf_explanation.cf_bruteforce import BFCFExplainer
 from torch_geometric.nn import GCNConv
 from utils.utils import safe_open
 
@@ -97,7 +99,7 @@ def load_dataset(path, device):
 
 def train_model(data, device, end=200):
     ''' Train GCN model '''
-    model = SmolGCN(data.num_features, data.num_classes).to(device)
+    model = GCN(data.num_features, data.num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=.001)
 
     train_mask = torch.zeros(data.num_nodes , dtype=torch.bool, device=device)
@@ -135,7 +137,7 @@ def explain_original(model, data, predictions, device, dst='results'):
                                         beta=.2,
                                         device=device)
 
-        cf_example = explainer.explain(node_idx=i, cf_optimizer='SGD', new_idx=new_idx, lr=.001,
+        cf_example = explainer.explain(node_idx=i, cf_optimizer='Adadelta', new_idx=new_idx, lr=.001,
                                        n_momentum=0.0, num_epochs=400)
 
         test_cf_examples.append(cf_example)
@@ -144,7 +146,7 @@ def explain_original(model, data, predictions, device, dst='results'):
         pickle.dump(test_cf_examples, f)
 
 
-def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400, stop=None):
+def explain_new(data, model, cf_model = CFExplainer, dst='results', beta=0.5, lr=0.1, epochs=400, stop=None):
     if stop is None:
         stop = len(data.test_set)
 
@@ -153,7 +155,7 @@ def explain_new(data, model, dst='results', beta=0.5, lr=0.1, epochs=400, stop=N
     predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
     explainer = Explainer(
         model=model,
-        algorithm=CFExplainer(epochs=epochs, lr=lr,
+        algorithm=cf_model(epochs=epochs, lr=lr,
                               storage=write_to,
                               beta=beta),
         explanation_type='model',
@@ -188,7 +190,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=20, help='Random seed.')
     parser.add_argument('--dst', type=str, default='results')
+    parser.add_argument('--cf', type=str, default='cf')
+
     args = parser.parse_args()
+
+    if args.cf == 'cf':
+        cf_model = CFExplainer
+    elif args.cf == 'greedy':
+        cf_model = GreedyCFExplainer
+    elif args.cf == 'bf':
+        cf_model = BFCFExplainer
+    else:
+        raise AttributeError('Incorrect cf specified, use cf, greedy or bf')
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -209,7 +222,7 @@ def main():
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, beta=.5, lr=.1, epochs=100)
+    explain_new(data, model, cf_model=cf_model, beta=.5, lr=.3, epochs=500)
     # explain_original(model, data, predictions, device)
 
 
