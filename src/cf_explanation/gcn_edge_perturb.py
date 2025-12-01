@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-from torch_geometric.nn import GCNConv
 
 
 class GCNSyntheticPerturbEdgeWeight(nn.Module):
@@ -24,12 +23,26 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=1., noise=0.):
+    def reset_parameters(self, eps=4., noise=0.4):
         """Initialize edge weight parameters"""
         with torch.no_grad():
             self.edge_weight_params.data.fill_(eps)
             if noise > 0.:
-                self.edge_weight_params += torch.rand_like(self.edge_weight_params) * noise
+                self.edge_weight_params += (.5 - torch.rand_like(self.edge_weight_params)) * noise
+
+    def reset_dataset(self, index, model=None, x=None, edge_index=None):
+        self.index = index
+
+        if model is not model:
+            self.model = model
+        if x is not None:
+            self.x = x
+        if edge_index is not None:
+            self.edge_index = edge_index
+            self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
+
+        self.original_class = torch.argmax(self.model(self.x, self.edge_index)[index])
+        self.reset_parameters()
 
     def forward(self):
         """
@@ -71,7 +84,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
     def get_weights(self):
         return self.edge_weight_params
 
-    def compute_edge_importance_gradients(self, num_samples=5, eps=1.0, noise=0.0):
+    def compute_edge_importance_gradients(self, num_samples=5, eps=4.0, noise=0.4):
         """
         Measure average gradient change over multiple samples
         """
@@ -88,6 +101,6 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.zero_grad()
             loss.backward()
 
-            importance_scores += torch.abs(self.edge_weight_params.grad)
+            importance_scores += self.edge_weight_params.grad
 
         return importance_scores / num_samples
