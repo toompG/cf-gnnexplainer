@@ -6,7 +6,7 @@ from utils.utils import *
 from torch_geometric.utils import to_dense_adj
 from functools import lru_cache
 
-from cf_explanation.cf_explainer import CFExplainer
+from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
 from cf_explanation.cf_greed import GreedyCFExplainer
 from cf_explanation.cf_bruteforce import BFCFExplainer
 
@@ -17,7 +17,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--exp', type=str, default='syn1')
 parser.add_argument('--dst', type=str, default='results')
-parser.add_argument('--lr', type=float, default=.1)
+parser.add_argument('--lr', type=float, default=.5)
 parser.add_argument('--seed', type=int, default=20)
 parser.add_argument('--cf', type=str, default='cf')
 
@@ -29,6 +29,8 @@ elif args.cf == 'greedy':
     cf_model = GreedyCFExplainer
 elif args.cf == 'bf':
     cf_model = BFCFExplainer
+elif args.cf == 'original':
+    cf_model = CFExplainerOriginal
 else:
     raise AttributeError('Incorrect cf specified, use cf, greedy or bf')
 
@@ -92,11 +94,36 @@ class WrappedOriginalGCN(torch.nn.Module):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--exp', type=str, default='syn1')
+    parser.add_argument('--dst', type=str, default='results')
+    parser.add_argument('--lr', type=float, default=.5)
+    parser.add_argument('--seed', type=int, default=20)
+    parser.add_argument('--cf', type=str, default='cf')
+
+    args = parser.parse_args()
+
+    if args.cf == 'cf':
+        cf_model = CFExplainer
+    elif args.cf == 'greedy':
+        cf_model = GreedyCFExplainer
+    elif args.cf == 'bf':
+        cf_model = BFCFExplainer
+    elif args.cf == 'original':
+        cf_model = CFExplainerOriginal
+    else:
+        raise AttributeError('Incorrect cf specified, use cf, greedy or bf')
+
+
+    script_dir = Path(__file__).parent
+    graph_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+    model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
+
+
     device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
     data = load_dataset(graph_path, device)
-    print(data.y)
 
     print(len(data.y.unique()))
     submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
@@ -104,6 +131,14 @@ def main():
 
     submodel.load_state_dict(torch.load(model_path))
     submodel.eval()
+
+    if args.cf == 'original':
+        # pred = torch.argmax(submodel(data.x, data.norm_adj), dim=1)
+        # train_accuracy_real = (pred == data.y).float().mean()
+        # print(train_accuracy_real)
+
+        explain_original(submodel, data)
+        return
 
     model = WrappedOriginalGCN(submodel).eval()
 

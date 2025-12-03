@@ -8,6 +8,8 @@ from example import load_dataset
 from pathlib import Path
 
 from torch_geometric.utils import k_hop_subgraph, mask_select
+from gcn import GCNSynthetic
+from cmp_original import WrappedOriginalGCN
 
 device = 'cpu'
 
@@ -22,6 +24,7 @@ args = parser.parse_args()
 # Load original graph
 script_dir = Path(__file__).parent
 graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
 graph_data_path = graph_data_path.resolve()
 data = load_dataset(graph_data_path, device)
 
@@ -43,6 +46,7 @@ df_motif = df[df["label"] != 0].reset_index(drop=True)
 # Accuracy defined as proportion of removed edges that were originally between motif nodes.
 #! Accuracy currently lower because nodes w/o CFs get proportion of all edges in network.
 #! Filtering for examples yields accuracy of 1 when explaining original model.
+
 accuracy = []
 for i in range(len(df_motif)):
     cf_edges = mask_select(data.edge_index, 1, ~torch.tensor(df_motif['cf_mask'][i]))
@@ -50,13 +54,31 @@ for i in range(len(df_motif)):
     overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set))
     accuracy.append(overlap_count / cf_edges.shape[1])
 
-    if accuracy[-1] < 1:
-        print(cf_edges)
-        print(df_motif.iloc[i])
+    # if accuracy[-1] < 1:
+    #     print(cf_edges)
+    #     print(df_motif.iloc[i])
 
 df_motif['accuracy'] = accuracy
 # df_motif = df_motif.dropna()
-cfs = df.dropna()
+cfs = df.dropna().reset_index()
+
+submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                        nclass=len(data.y.unique()), dropout=0)
+
+submodel.load_state_dict(torch.load(model_path))
+submodel.eval()
+
+model = WrappedOriginalGCN(submodel).eval()
+
+for i in range(len(cfs)):
+    # print(cfs['cf_mask'])
+    # cf_edges = data.edge_index[:, mask]
+    cf_edges = mask_select(data.edge_index, 1, torch.tensor(cfs['cf_mask'][i]))
+
+    # print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+    # print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+
+    assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
 print(f'{args.exp} tested at {args.dst}')
 print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes')

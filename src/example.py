@@ -13,7 +13,6 @@ from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
 from cf_explanation.cf_greed import GreedyCFExplainer
 from cf_explanation.cf_bruteforce import BFCFExplainer
 from torch_geometric.nn import GCNConv
-from utils.utils import safe_open
 
 import argparse
 import numpy as np
@@ -22,11 +21,6 @@ import pickle
 from tqdm import tqdm
 from pathlib import Path
 
-from gcn import GCNSynthetic
-
-# Get current script directory and construct path
-
-# torch.use_deterministic_algorithms(True)
 
 columns = ['node', 'label', 'prediction', 'cf_prediction',
            'distance', 'cf_mask']
@@ -116,37 +110,31 @@ def train_model(data, device, end=200):
     return model
 
 
-def explain_original(model, data, predictions, device, dst='results'):
+def explain_original(model, data, device='cpu', dst='results'):
+    predictions = torch.argmax(model(data.x, data.norm_adj), dim=1)
+
     test_cf_examples = []
     for i in tqdm(data.test_set):
-        sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i),
-                                                        data.edge_index,
-                                                        3, # Magic number!
-                                                        data.x,
-                                                        data.y)
-        new_idx = node_dict[int(i)]
-
-        explainer = CFExplainerOriginal(model=model,
-                                        sub_adj=sub_adj,
-                                        sub_feat=sub_feat,
+        explainer = CFExplainerOriginal(model,
+                                        data,
+                                        i,
                                         n_hid=20,
-                                        dropout=0.0,
-                                        sub_labels=sub_labels,
-                                        y_pred_orig= predictions[i],
                                         num_classes = data.num_classes,
-                                        beta=.2,
+                                        dropout=0.0,
+                                        beta=.5,
                                         device=device)
 
-        cf_example = explainer.explain(node_idx=i, cf_optimizer='Adadelta', new_idx=new_idx, lr=.001,
-                                       n_momentum=0.0, num_epochs=400)
+        cf_example = explainer.explain(cf_optimizer='SGD', lr=.1,
+                                       n_momentum=0.9, num_epochs=100)
 
-        test_cf_examples.append(cf_example)
+        test_cf_examples.append([i.item(), data.y[i].item(), predictions[i].item()] + cf_example)
 
-    with safe_open(f"../results/{dst}", "wb") as f:
-        pickle.dump(test_cf_examples, f)
+    df = pd.DataFrame(test_cf_examples, columns=columns)
+    df.to_pickle(f"../results/{dst}.pkl")
 
 
-def explain_new(data, model, cf_model = CFExplainer, dst='results', beta=0.5, lr=0.1, epochs=400, stop=None):
+def explain_new(data, model, cf_model = CFExplainer, dst='results',
+                beta=0.5, lr=0.1, epochs=400, stop=None):
     if stop is None:
         stop = len(data.test_set)
 

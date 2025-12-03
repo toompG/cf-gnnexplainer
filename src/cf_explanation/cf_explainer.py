@@ -10,7 +10,8 @@ from torch import Tensor
 from torch.nn.utils import clip_grad_norm
 from utils.utils import get_degree_matrix
 from .gcn_edge_perturb import GCNSyntheticPerturbEdgeWeight
-from utils.utils import normalize_adj
+from .gcn_perturb import GCNSyntheticPerturb
+from utils.utils import get_neighbourhood
 
 from torch_geometric.explain import Explanation
 from torch_geometric.explain.algorithm import ExplainerAlgorithm
@@ -243,6 +244,22 @@ class CFExplainer(ExplainerAlgorithm):
             raise ValueError('Invalid optimizer value')
 
 
+def convert_subadj_to_full_mask(node_dict, sub_adj, edge_index):
+    vals = []
+
+    for i in edge_index.T:
+        v1 = i[0].item()
+        v2 = i[1].item()
+
+        if v1 not in node_dict or v2 not in node_dict:
+            vals.append(False)
+            continue
+        v1 = node_dict[v1]
+        v2 = node_dict[v2]
+        vals.append(bool(sub_adj[v1][v2]))
+
+    return torch.tensor(vals)
+
 
 # inherit from explainer algorithm pytorch geometric
 # implement baseclass functions
@@ -251,24 +268,35 @@ class CFExplainerOriginal():
     CF Explainer class, returns counterfactual subgraph
     """
 
-    def __init__(self, model, sub_adj, sub_feat, n_hid, dropout, sub_labels,
-                 y_pred_orig, num_classes, beta, device):
+    def __init__(self, model, data, index, n_hid, num_classes, dropout, beta, device):
         # super(CFExplainer,      # This does nothing?
         #       self).__init__()  # init superclass, inherits nothing
         self.model = model # trained gcnconv model
         self.model.eval()
+
+        sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(index),
+                                                data.edge_index,
+                                                4,
+                                                data.x,
+                                                data.y)
+        self.new_idx = node_dict[int(index)]
+        self.node_idx = int(index)
+        self.node_dict = node_dict
+        self.y_pred_orig = torch.argmax(model(data.x, data.norm_adj), dim=1)[int(index)]
+
+        self.edge_index = data.edge_index
         self.sub_adj = sub_adj # adjacency matrix to explain
         self.sub_feat = sub_feat # node features of subgraph
         self.n_hid = n_hid # dimension size in gnn
         self.dropout = dropout # dropout rate for model
         self.sub_labels = sub_labels # ground truth sub labels for nodes
-        self.y_pred_orig = y_pred_orig # original prediction
+        # self.y_pred_orig = y_pred_orig # original prediction
         self.beta = beta # weight balancing loss vs graph distance loss
         self.num_classes = num_classes # number of classes in classification
         self.device = device # device (yknow)
 
         # Instantiate CF model class, load weights from original model
-        self.cf_model = GCNSyntheticPerturbEdgeWeight(self.sub_feat.shape[1], n_hid,
+        self.cf_model = GCNSyntheticPerturb(self.sub_feat.shape[1], n_hid,
                                             n_hid, self.num_classes,
                                             self.sub_adj, dropout, beta)
 
@@ -284,10 +312,9 @@ class CFExplainerOriginal():
         #     print("cf model requires_grad: ", name, param.requires_grad)
 
     ''' This is forward in ExplainerAlgorithm class for PyG '''
-    def explain(self, cf_optimizer, node_idx, new_idx, lr, n_momentum,
+    def explain(self, cf_optimizer, lr, n_momentum,
                 num_epochs):
-        self.node_idx = node_idx
-        self.new_idx = new_idx
+        # self.new_idx = new_idx
 
         self.x = self.sub_feat
         self.A_x = self.sub_adj
@@ -313,10 +340,17 @@ class CFExplainerOriginal():
                 best_cf_example.append(new_example)
                 best_loss = loss_total
                 num_cf_examples += 1
+
+                new_example[-1] = convert_subadj_to_full_mask(self.node_dict,
+                                                              new_example[-1],
+                                                              self.edge_index)
+                break
         print("{} CF examples for node_idx = {}".format(
             num_cf_examples, self.node_idx))
         print(" ")
-        return (best_cf_example)
+        if best_cf_example == []:
+            return [self.y_pred_orig.item(), np.nan, np.zeros(self.edge_index.shape[1], dtype=bool)]
+        return best_cf_example[0]
 
     def train(self, epoch):
         t = time.time()
@@ -354,17 +388,18 @@ class CFExplainerOriginal():
         cf_stats = []
         if y_pred_new_actual != self.y_pred_orig:
             cf_stats = [
-                self.node_idx.item(),
-                self.new_idx.item(),
-                cf_adj.detach().numpy(),
-                self.sub_adj.detach().numpy(),
-                self.y_pred_orig.item(),
-                y_pred_new.item(),
+                # self.node_idx.item(),
+                # self.new_idx.item(),
+                # cf_adj.detach().numpy(),
+                # self.sub_adj.detach().numpy(),
+                # self.y_pred_orig.item(),
+                # y_pred_new.item(),
                 y_pred_new_actual.item(),
-                self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
-                loss_total.item(),
-                loss_pred.item(),
-                loss_graph_dist.item()
+                # self.sub_labels[self.new_idx].numpy(), self.sub_adj.shape[0],
+                # loss_total.item(),
+                # loss_pred.item(),
+                loss_graph_dist.item(),
+                self.cf_model.P * self.sub_adj
             ]
 
         return (cf_stats, loss_total.item())
