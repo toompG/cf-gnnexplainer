@@ -15,7 +15,7 @@ class GreedyCFExplainer(CFExplainer):
 
 
     """
-    def find_cf(self, model, index, x, edge_index):
+    def _find_cf(self, model, index, x, edge_index):
         self.prediction = torch.argmax(model(x, edge_index)[index])
 
         cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,

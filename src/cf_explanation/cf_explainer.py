@@ -71,15 +71,46 @@ class CFExplainer(ExplainerAlgorithm):
         self.edge_index = edge_index
 
         model.eval()
-        self.prediction = torch.argmax(model(x, edge_index)[self.index])
-        best_cf_example = self.find_cf(model, index, x, edge_index)
+        self.prediction = torch.argmax(model(x, edge_index), dim=1)[self.index]
+
+        # Extract k-hop subgraph
+        sub_nodes, sub_edge_index, mapping, edge_mask = k_hop_subgraph(
+            int(self.index),
+            4,
+            edge_index,
+            relabel_nodes=True
+        )
+
+        self.sub_nodes = sub_nodes
+        self.sub_to_full_edge_mask = edge_mask
+        self.full_edge_count = edge_index.shape[1]
+
+        sub_x = x[sub_nodes]
+        sub_index = mapping if mapping.dim() > 0 else mapping.unsqueeze(0)
+
+        best_cf_example = self._find_cf(model, int(sub_index), sub_x, sub_edge_index)
+
+        if best_cf_example != []:
+            best_cf_example = self._map_to_full_graph(best_cf_example, sub_edge_index, mapping)
 
         if 'storage' in self.coeffs:
-            self.store_result(best_cf_example)
+            self._store_result(best_cf_example)
 
         return Explanation(best_cf_example)
 
-    def store_result(self, best_cf_example):
+    def _map_to_full_graph(self, cf_explanation, sub_edge_index, mapping):
+        sub_edge_mask = cf_explanation[-1][2]
+
+        full_edge_mask = torch.ones(self.full_edge_count, dtype=torch.bool)
+        subgraph_edge_positions = torch.where(self.sub_to_full_edge_mask)[0]
+
+        for sub_idx, full_idx in enumerate(subgraph_edge_positions):
+            full_edge_mask[full_idx] = bool(sub_edge_mask[sub_idx])
+
+        cf_explanation[-1][2] = np.array(full_edge_mask)
+        return cf_explanation
+
+    def _store_result(self, best_cf_example):
         print(f'node {self.index}: {len(best_cf_example)}')
         if best_cf_example != []:
             self.coeffs['storage'][0] = True
@@ -91,7 +122,7 @@ class CFExplainer(ExplainerAlgorithm):
                       np.zeros(self.edge_index.shape[1], dtype=bool)]
             self.coeffs['storage'].append(result)
 
-    def find_cf(self, model, index, x, edge_index):
+    def _find_cf(self, model, index, x, edge_index):
         cf_model = GCNSyntheticPerturbEdgeWeight(
             model,
             index,

@@ -20,44 +20,6 @@ from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj,
 from torch_geometric.explain.config import ExplanationType
 
 
-def find_cf(model, index, x, edge_index, epochs, eps, noise, beta=.5):
-    cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,
-                                              beta=beta)
-
-    prediction = torch.argmax(model(x, edge_index)[index])
-
-    scores = cf_model.compute_edge_importance_gradients(num_samples=10,
-                                                        eps=eps, noise=noise)
-    ranking = sorted(list(enumerate(edge_index.T)),
-                        key=lambda x: -scores[x[0]])
-
-    best_distance = np.inf
-    best_loss = np.inf
-    best_cf_example = []
-
-    mask = torch.tensor(torch.ones(edge_index.shape[1]), dtype=bool)
-    for i in range(1, epochs):
-        binary_mask = bin(i)[2:]
-        distance = binary_mask.count('1')
-
-        for bit, j in zip(binary_mask[::-1], ranking):
-            mask[j[0]] = bit != '1'
-
-        masked_edge_index = edge_index[:, mask]
-        out = model(x, masked_edge_index)[index]
-        new_prediction = torch.argmax(out)
-        loss = out[prediction]
-
-        if new_prediction != prediction and distance <= best_distance and loss < best_loss:
-            best_distance = distance
-            best_loss = loss
-
-            best_cf_example.append([new_prediction.item(), distance, mask.clone()])
-            if distance == 1:
-                break
-    return best_cf_example
-
-
 class BFCFExplainer(CFExplainer):
     r"""
     ExplainerAlgorithm: Forward, explainer_config and model_config seem fun to use
@@ -67,7 +29,7 @@ class BFCFExplainer(CFExplainer):
 
 
     """
-    def find_cf(self, model, index, x, edge_index):
+    def _find_cf(self, model, index, x, edge_index):
         cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,
                                                  beta=self.coeffs['beta'])
 
