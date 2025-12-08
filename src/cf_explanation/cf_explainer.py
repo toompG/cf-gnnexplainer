@@ -32,6 +32,8 @@ class CFExplainer(ExplainerAlgorithm):
         'dropout': 0.0,
         'num_layers': None,
         'beta': .5,
+        'eps': 1.0,
+        'noise': 0.0
     }
 
     def __init__(
@@ -63,26 +65,45 @@ class CFExplainer(ExplainerAlgorithm):
         **kwargs,
     ) -> Explanation:
         if index is None:
-            index = Tensor(range(len(x)))
+            self.index = Tensor(range(len(x)))
+        else:
+            self.index = index
+        self.edge_index = edge_index
 
         model.eval()
-        # TODO: subgraph for performance reasons
+        self.prediction = torch.argmax(model(x, edge_index)[self.index])
+        best_cf_example = self.find_cf(model, index, x, edge_index)
 
+        if 'storage' in self.coeffs:
+            self.store_result(best_cf_example)
+
+        return Explanation(best_cf_example)
+
+    def store_result(self, best_cf_example):
+        print(f'node {self.index}: {len(best_cf_example)}')
+        if best_cf_example != []:
+            self.coeffs['storage'][0] = True
+            self.coeffs['storage'].append(best_cf_example[-1])
+        else:
+            self.coeffs['storage'][0] = True
+            result = [self.prediction.item(),
+                      float('nan'),
+                      np.zeros(self.edge_index.shape[1], dtype=bool)]
+            self.coeffs['storage'].append(result)
+
+    def find_cf(self, model, index, x, edge_index):
         cf_model = GCNSyntheticPerturbEdgeWeight(
             model,
             index,
             x,
             edge_index,
             beta=self.coeffs['beta'],
-            edge_additions=True
         )
 
-        self.prediction = torch.argmax(model(x, edge_index)[index])
-
+        cf_model.reset_parameters(self.coeffs['eps'], 0.0)
         cf_optimizer = self._initialize_cf_optimizer(cf_model)
 
         best_cf_example = []
-        best_loss = np.inf
         best_distance = np.inf
 
         for epoch in range(self.epochs):
@@ -103,27 +124,8 @@ class CFExplainer(ExplainerAlgorithm):
                 best_distance = new_example[1]
 
                 # skip when optimal cf found
-                if new_example[1] == 1.:
-                    break
-                break
-        # TODO: Figure out the correct output type
-
-        # TODO: Make example communication not shit
-        print(f'node {index}: {len(best_cf_example)}')
-        if 'storage' in self.coeffs and best_cf_example != []:
-            self.coeffs['storage'][0] = True
-            self.coeffs['storage'].append(best_cf_example[-1])
-        else:
-            self.coeffs['storage'][0] = True
-            result = [self.prediction.item(),
-                      float('nan'),
-                      np.zeros(edge_index.shape[1], dtype=bool)
-            ]
-            self.coeffs['storage'].append(result)
-
-
-
-        return Explanation(best_cf_example)
+                return best_cf_example
+        return []
 
     def cf_train(
         self,
@@ -252,7 +254,7 @@ def convert_subadj_to_full_mask(node_dict, sub_adj, edge_index):
         v2 = i[1].item()
 
         if v1 not in node_dict or v2 not in node_dict:
-            vals.append(False)
+            vals.append(True)
             continue
         v1 = node_dict[v1]
         v2 = node_dict[v2]

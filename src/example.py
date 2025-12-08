@@ -110,7 +110,7 @@ def train_model(data, device, end=200):
     return model
 
 
-def explain_original(model, data, device='cpu', dst='results'):
+def explain_original(model, data, lr=.1, n_momentum=0.9, epochs=500, device='cpu', dst='results'):
     predictions = torch.argmax(model(data.x, data.norm_adj), dim=1)
 
     test_cf_examples = []
@@ -124,8 +124,8 @@ def explain_original(model, data, device='cpu', dst='results'):
                                         beta=.5,
                                         device=device)
 
-        cf_example = explainer.explain(cf_optimizer='SGD', lr=.1,
-                                       n_momentum=0.9, num_epochs=100)
+        cf_example = explainer.explain(cf_optimizer='SGD', lr=lr,
+                                       n_momentum=n_momentum, num_epochs=epochs)
 
         test_cf_examples.append([i.item(), data.y[i].item(), predictions[i].item()] + cf_example)
 
@@ -134,7 +134,7 @@ def explain_original(model, data, device='cpu', dst='results'):
 
 
 def explain_new(data, model, cf_model = CFExplainer, dst='results',
-                beta=0.5, lr=0.1, epochs=400, stop=None):
+                beta=0.5, lr=0.1, epochs=400, momentum=0.0, eps=1.0, stop=None):
     if stop is None:
         stop = len(data.test_set)
 
@@ -145,7 +145,9 @@ def explain_new(data, model, cf_model = CFExplainer, dst='results',
         model=model,
         algorithm=cf_model(epochs=epochs, lr=lr,
                               storage=write_to,
-                              beta=beta),
+                              beta=beta,
+                               n_momentum=momentum,
+                               eps=eps),
         explanation_type='model',
         edge_mask_type='object',
         model_config=dict(

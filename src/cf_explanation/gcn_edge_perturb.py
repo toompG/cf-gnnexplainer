@@ -23,7 +23,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=4., noise=0.4):
+    def reset_parameters(self, eps=1.0, noise=0.0):
         """Initialize edge weight parameters"""
         with torch.no_grad():
             self.edge_weight_params.data.fill_(eps)
@@ -84,7 +84,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
     def get_weights(self):
         return self.edge_weight_params
 
-    def compute_edge_importance_gradients(self, num_samples=5, eps=4.0, noise=0.4):
+    def sample_edge_importance(self, num_samples=5, eps=4.0, noise=0.4):
         """
         Measure average gradient change over multiple samples
         """
