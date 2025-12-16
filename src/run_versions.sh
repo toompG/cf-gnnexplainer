@@ -12,4 +12,4 @@ uv run evaluate.py --exp='syn4' --dst='syn4bf.pkl' >> ../run_versions.txt
 uv run evaluate.py --exp='syn5' --dst='syn5greedy.pkl' >> ../run_versions.txt
 uv run evaluate.py --exp='syn5' --dst='syn5bf.pkl' >> ../run_versions.txt
 
-cat ../evaluation.txt
+cat ../run_versions.txt

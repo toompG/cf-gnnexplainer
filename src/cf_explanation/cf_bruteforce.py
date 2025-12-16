@@ -30,9 +30,19 @@ class BFCFExplainer(CFExplainer):
 
     """
     def _find_cf(self, model, index, x, edge_index):
+        '''
+        Find counterfactuals by creating a ranking of important edges for the
+        node index and removing combinations of them up to self.epochs.
+
+        Combinations are found by converting the current epoch to binary where
+        the nth bit removes the n most important edge according to the ranking.
+        ie ...000101 removes the 1st and 3rd highest ranked edges.
+
+        '''
         cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,
                                                  beta=self.coeffs['beta'])
 
+        # create ranking of most important edges
         scores = cf_model.sample_edge_importance(num_samples=10,
                                                  eps=self.coeffs['eps'],
                                                  noise=self.coeffs['noise'])
@@ -48,6 +58,7 @@ class BFCFExplainer(CFExplainer):
             binary_mask = bin(i)[2:]
             distance = binary_mask.count('1')
 
+            # Zero out edges according to current epoch
             for bit, j in zip(binary_mask[::-1], ranking):
                 mask[j[0]] = bit != '1'
 
@@ -56,9 +67,10 @@ class BFCFExplainer(CFExplainer):
             new_prediction = torch.argmax(out)
             loss = out[self.prediction]
 
+            # break same-distance ties using loss for accuracy
             if new_prediction != self.prediction and \
                        distance <= best_distance and \
-                                loss < best_loss:
+                                    loss < best_loss:
                 best_distance = distance
                 best_loss = loss
 

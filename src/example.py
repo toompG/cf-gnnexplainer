@@ -84,7 +84,8 @@ def load_dataset(path, device):
         num_classes=len(labels.unique()),
         train_set = idx_train,
         test_set = idx_test,
-        norm_adj = norm_adj
+        norm_adj = norm_adj,
+        adj = adj
     )
 
     data.to(device)
@@ -174,7 +175,7 @@ def explain_new(data, model, cf_model = CFExplainer, dst='results',
 
 def main():
     script_dir = Path(__file__).parent
-    graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
+    graph_data_path = script_dir / '../data/gnn_explainer/syn5.pickle'
     graph_data_path = graph_data_path.resolve()
 
     parser = argparse.ArgumentParser()
@@ -212,7 +213,7 @@ def main():
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(data, model, cf_model=cf_model, beta=.5, lr=.3, epochs=500)
+    explain_new(data, model, cf_model=cf_model, beta=.5, lr=.5, eps=0.5, epochs=500, momentum=.9)
     # explain_original(model, data, predictions, device)
 
 

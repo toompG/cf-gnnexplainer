@@ -8,14 +8,10 @@ from .gcn_edge_perturb import GCNSyntheticPerturbEdgeWeight
 
 class GreedyCFExplainer(CFExplainer):
     r"""
-    ExplainerAlgorithm: Forward, explainer_config and model_config seem fun to use
-
-    Return type Explanation might not be suited for CF example
-    _loss_binary_classification etc not for cf objectives
-
-
+    
     """
     def _find_cf(self, model, index, x, edge_index):
+        """ Remove edges sequentually in order from most to least important """
         self.prediction = torch.argmax(model(x, edge_index)[index])
 
         cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,

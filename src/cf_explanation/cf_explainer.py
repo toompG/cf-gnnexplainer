@@ -25,8 +25,6 @@ class CFExplainer(ExplainerAlgorithm):
 
     Return type Explanation might not be suited for CF example
     _loss_binary_classification etc not for cf objectives
-
-
     """
     coeffs = {
         'dropout': 0.0,
@@ -89,7 +87,6 @@ class CFExplainer(ExplainerAlgorithm):
         sub_index = mapping if mapping.dim() > 0 else mapping.unsqueeze(0)
 
         best_cf_example = self._find_cf(model, int(sub_index), sub_x, sub_edge_index)
-
         if best_cf_example != []:
             best_cf_example = self._map_to_full_graph(best_cf_example, sub_edge_index, mapping)
 
@@ -111,6 +108,7 @@ class CFExplainer(ExplainerAlgorithm):
         return cf_explanation
 
     def _store_result(self, best_cf_example):
+        # TODO : Run from example function, rebuild all values from return explanation
         print(f'node {self.index}: {len(best_cf_example)}')
         if best_cf_example != []:
             self.coeffs['storage'][0] = True
@@ -399,6 +397,9 @@ class CFExplainerOriginal():
         # Need to use new_idx from now on since sub_adj is reindexed
         y_pred_new = torch.argmax(output[self.new_idx])
         y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
+
+        # print(output[self.new_idx])
+        # print(self.cf_model.P_vec)
 
         # loss_pred indicator should be based on y_pred_new_actual NOT y_pred_new!
         loss_total, loss_pred, loss_graph_dist, cf_adj = self.cf_model.loss(
