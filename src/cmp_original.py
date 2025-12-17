@@ -235,9 +235,13 @@ def edge_index2norm_adj(edge_index, edge_weights=None, num_nodes=None, vector=Fa
         edge_weights = torch.ones(edge_index.shape[1], device=device)
 
     row, col = edge_index
-    adj[row, col] = edge_weights
-    if vector:
-        adj[col, row] = edge_weights
+    adj[row, col] += edge_weights
+
+    if torch.all(adj.transpose(0, 1) == adj):
+        pass
+    else:
+        adj[col, row] += edge_weights
+    # adj[col, row] += edge_weights
 
     adj = adj + torch.eye(num_nodes, device=device)
 
@@ -257,12 +261,11 @@ def edge_index2norm_adj(edge_index, edge_weights=None, num_nodes=None, vector=Fa
 
 
 class WrappedOriginalGCN(torch.nn.Module):
-    def __init__(self, submodel, vector=False):
+    def __init__(self, submodel):
         super().__init__()
         self.submodel = submodel
-        self.vector = vector
 
-    def forward(self, x, edge_index, edge_weights=None):
+    def forward(self, x, edge_index, edge_weights=None, vector=False):
         num_nodes = x.shape[0]
 
         # if edge_weights is None:
@@ -276,7 +279,7 @@ class WrappedOriginalGCN(torch.nn.Module):
         #     return result
 
         return self.submodel(x, edge_index2norm_adj(edge_index, edge_weights,
-                                                    num_nodes, self.vector)
+                                                    num_nodes, vector)
 )
 
 
@@ -284,10 +287,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp', type=str, default='syn1')
     parser.add_argument('--dst', type=str, default='results')
-    parser.add_argument('--lr', type=float, default=.5)
+    parser.add_argument('--lr', type=float, default=.1)
     parser.add_argument('--momentum', type=float, default=0.0)
     parser.add_argument('--epochs', type=int, default=500)
-    parser.add_argument('--eps', type=int, default=0.5)
+    parser.add_argument('--eps', type=int, default=1.0)
 
 
     parser.add_argument('--seed', type=int, default=20)
@@ -335,7 +338,7 @@ def main():
 
     model = WrappedOriginalGCN(submodel).eval()
 
-    weights = torch.sigmoid(torch.ones_like(data.edge_index[0]))
+    # weights = torch.sigmoid(torch.ones_like(data.edge_index[0]))
     weights=None
     output = model(data.x, data.edge_index, edge_weights=weights)
     output_real = submodel(data.x, data.norm_adj)
@@ -348,6 +351,8 @@ def main():
 
     print(f'Wrapped accuracy: {train_accuracy}\nOriginal accuracy: {train_accuracy_real}')
     print(f'Difference: {torch.sum(output - output_real)}')
+
+    print(f'{output[600]}')
 
     #TODO: test difference for non-zero edge_weights
 

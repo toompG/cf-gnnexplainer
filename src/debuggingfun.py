@@ -165,45 +165,49 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
     print("DENSE VS SPARSE GRADIENT COMPARISON")
     print("=" * 80)
 
+    for i in range(3):
     # Forward pass for both
-    out_dense = dense_model.forward(x, adj_dense)
-    out_sparse = sparse_model.forward()
+        out_dense = dense_model.forward(x, adj_dense)
+        out_sparse = sparse_model.forward()
 
-    _ = dense_model.forward_prediction(x)
-    _ = sparse_model.forward_hard()
+        _ = dense_model.forward_prediction(x)
+        _ = sparse_model.forward_hard()
 
-    # Get predictions
-    idx = sparse_model.index
-    y_pred_orig_dense = torch.argmax(out_dense[idx])
-    y_pred_orig_sparse = torch.argmax(out_sparse)
+        # Get predictions
+        idx = sparse_model.index
+        print(out_sparse)
+        y_pred_orig_dense = torch.argmax(out_dense[idx])
+        y_pred_orig_sparse = torch.argmax(out_sparse)
 
-    print(f"\nPredictions:")
-    print(f"  Dense: {y_pred_orig_dense.item()}")
-    print(f"  Sparse: {y_pred_orig_sparse.item()}")
+        print(f"\nPredictions:")
+        print(f"  Dense: {y_pred_orig_dense.item()}")
+        print(f"  Sparse: {y_pred_orig_sparse.item()}")
 
-    # Compute losses
-    loss_dense, _, _, _ = dense_model.loss(out_dense[idx], y_pred_orig_dense, y_pred_orig_dense)
-    loss_sparse, _, _, _ = sparse_model.loss(out_sparse, y_pred_orig_sparse)
+        # Compute losses
+        loss_dense, _, _, _ = dense_model.loss(out_dense[idx], y_pred_orig_dense, y_pred_orig_dense)
+        loss_sparse, _, _, _ = sparse_model.loss(out_sparse, y_pred_orig_sparse)
 
-    print(f"\nLosses:")
-    print(f"  Dense: {loss_dense.item():.6f}")
-    print(f"  Sparse: {loss_sparse.item():.6f}")
-    print(f"  Difference: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
+        print(f"\nLosses:")
+        print(f"  Dense: {loss_dense.item():.6f}")
+        print(f"  Sparse: {loss_sparse.item():.6f}")
+        print(f"  Difference: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
 
-    # Backward
-    dense_model.zero_grad()
-    sparse_model.zero_grad()
+        # Backward
+        dense_model.zero_grad()
+        sparse_model.zero_grad()
 
-    loss_dense.backward()
-    loss_sparse.backward()
+        loss_dense.backward()
+        loss_sparse.backward()
 
-    # Compare P_vec gradients (dense) vs edge_weight_params gradients (sparse)
-    if dense_model.P_vec.grad is not None and sparse_model.edge_weight_params.grad is not None:
+        # Compare P_vec gradients (dense) vs edge_weight_params gradients (sparse)
+        if dense_model.P_vec.grad is None or sparse_model.edge_weight_params.grad is None:
+            print("missing gradients")
+            return
         bruh = extract_grads_for_sparse_edges(dense_model.P_vec.grad, sparse_model.edge_index, dense_model.num_nodes)
 
-        for E, i, j in zip(sparse_model.edge_index.T, bruh, sparse_model.edge_weight_params.grad):
-            if i != 0. or j != 0:
-                print(E, i, j, i-j)
+        # for E, i, j in zip(sparse_model.edge_index.T, bruh, sparse_model.edge_weight_params.grad):
+        #     if i != 0. or j != 0:
+        #         print(E, i, j, i-j)
 
         print(f"\nGradient statistics:")
         print(f"  Dense P_vec grad mean: {abs(bruh).mean().item():.6e}")
@@ -211,8 +215,18 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
         print(f"  Dense P_vec grad std: {bruh.std().item():.6e}")
         print(f"  Sparse edge_weight grad std: {sparse_model.edge_weight_params.grad.std().item():.6e}")
         print(f"difference: {sum(abs(bruh - sparse_model.edge_weight_params.grad))}")
-    else:
-        print("\nWARNING: Missing gradients!")
+
+
+        with torch.no_grad():
+            lr = 0.1
+            if dense_model.P_vec.grad is not None:
+                dense_model.P_vec -= lr * dense_model.P_vec.grad
+                print(f"\nParameter update:")
+                print(f"  Updated {(dense_model.P_vec.grad != 0).sum().item()} parameters")
+            if sparse_model.edge_weight_params.grad is not None:
+                sparse_model.edge_weight_params -= lr * sparse_model.edge_weight_params.grad
+                print(f"\nParameter update:")
+                print(f"  Updated {(sparse_model.edge_weight_params.grad != 0).sum().item()} parameters")
 
 
 def trace_backward_chain(tensor, name="tensor", depth=0, max_depth=5):
@@ -300,7 +314,7 @@ submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
 submodel.load_state_dict(torch.load(model_path))
 submodel.eval()
 
-model = WrappedOriginalGCN(submodel, vector=True).eval()
+model = WrappedOriginalGCN(submodel).eval()
 
 def remove_bidirectional_edges(edge_index):
     edges = edge_index.numpy().T
@@ -313,6 +327,7 @@ def remove_bidirectional_edges(edge_index):
     return torch.tensor(result).t().contiguous()
 
 edge_index = remove_bidirectional_edges(data.edge_index)
+# edge_index = data.edge_index
 
 
 x = data.x

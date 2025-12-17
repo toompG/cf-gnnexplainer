@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch import Tensor
 from torch.nn.utils import clip_grad_norm
 from utils.utils import get_degree_matrix
-from .gcn_edge_perturb import GCNSyntheticPerturbEdgeWeight
+from .gcn_vectorized import GCNSyntheticPerturbEdgeWeight
 from .gcn_perturb import GCNSyntheticPerturb
 from utils.utils import get_neighbourhood
 
@@ -17,6 +17,17 @@ from torch_geometric.explain import Explanation
 from torch_geometric.explain.algorithm import ExplainerAlgorithm
 from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj, subgraph
 from torch_geometric.explain.config import ExplanationType
+
+
+def remove_bidirectional_edges(edge_index):
+    edges = edge_index.numpy().T
+
+    sorted_edges = np.sort(edges, axis=1)
+    unique_edges, indices = np.unique(sorted_edges, axis=0, return_index=True)
+
+    result = edges[indices]
+
+    return torch.tensor(result).t().contiguous()
 
 
 class CFExplainer(ExplainerAlgorithm):
@@ -129,6 +140,8 @@ class CFExplainer(ExplainerAlgorithm):
             beta=self.coeffs['beta'],
         )
 
+        # cf_model.original_class = torch.argmax(model(x, edge_index)[index])
+
         cf_model.reset_parameters(self.coeffs['eps'], 0.0)
         cf_optimizer = self._initialize_cf_optimizer(cf_model)
 
@@ -194,8 +207,11 @@ class CFExplainer(ExplainerAlgorithm):
             y_new
         )
 
+        # print(loss_total)
+        print(output, loss_total)
+
         loss_total.backward()
-        clip_grad_norm(cf_model.parameters(), 2.0)
+        # clip_grad_norm(cf_model.parameters(), 2.0)
         cf_optimizer.step()
 
         # TODO: This should not be in the train function
@@ -261,14 +277,14 @@ class CFExplainer(ExplainerAlgorithm):
         ) -> optim.Optimizer:
         if self.optimizer == 'SGD':
             return optim.SGD(
-                [cf_model.edge_weight_params],
+                [cf_model.P_vec],
                 self.lr,
                 self.n_momentum,
                 nesterov=(self.n_momentum != 0.0),
             )
         elif self.optimizer == 'Adadelta':
             return optim.Adadelta(
-                [cf_model.edge_weight_params],
+                [cf_model.P_vec],
                 self.lr,
             )
         else:
@@ -407,6 +423,10 @@ class CFExplainerOriginal():
         loss_total.backward()
         clip_grad_norm(self.cf_model.parameters(), 2.0)
         self.cf_optimizer.step()
+
+        print(output[self.new_idx], loss_total)
+        # print(loss_total)
+
         # print('Node idx: {}'.format(self.node_idx),
         #       'New idx: {}'.format(self.new_idx),
         #       'Epoch: {:04d}'.format(epoch + 1),
