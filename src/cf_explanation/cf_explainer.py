@@ -19,17 +19,6 @@ from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj,
 from torch_geometric.explain.config import ExplanationType
 
 
-def remove_bidirectional_edges(edge_index):
-    edges = edge_index.numpy().T
-
-    sorted_edges = np.sort(edges, axis=1)
-    unique_edges, indices = np.unique(sorted_edges, axis=0, return_index=True)
-
-    result = edges[indices]
-
-    return torch.tensor(result).t().contiguous()
-
-
 class CFExplainer(ExplainerAlgorithm):
     r"""
     ExplainerAlgorithm: Forward, explainer_config and model_config seem fun to use
@@ -49,7 +38,7 @@ class CFExplainer(ExplainerAlgorithm):
         self,
         # predictions: Tensor,
         epochs: int = 200,
-        lr: float = 0.001,
+        lr: float = 0.1,
         optimizer: str = 'SGD',
         n_momentum: float = 0.0,
         **kwargs,
@@ -208,7 +197,7 @@ class CFExplainer(ExplainerAlgorithm):
         )
 
         # print(loss_total)
-        print(output, loss_total)
+        # print(output, loss_total)
 
         loss_total.backward()
         # clip_grad_norm(cf_model.parameters(), 2.0)
@@ -306,6 +295,97 @@ def convert_subadj_to_full_mask(node_dict, sub_adj, edge_index):
         vals.append(bool(sub_adj[v1][v2]))
 
     return torch.tensor(vals)
+
+
+class BFCFExplainer(CFExplainer):
+    r"""
+    ExplainerAlgorithm: Forward, explainer_config and model_config seem fun to use
+
+    Return type Explanation might not be suited for CF example
+    _loss_binary_classification etc not for cf objectives
+
+
+    """
+    def _find_cf(self, model, index, x, edge_index):
+        '''
+        Find counterfactuals by creating a ranking of important edges for the
+        node index and removing combinations of them up to self.epochs.
+
+        Combinations are found by converting the current epoch to binary where
+        the nth bit removes the n most important edge according to the ranking.
+        ie ...000101 removes the 1st and 3rd highest ranked edges.
+
+        '''
+        cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,
+                                                 beta=self.coeffs['beta'])
+
+        # create ranking of most important edges
+        scores = cf_model.sample_edge_importance(num_samples=1,
+                                                 eps=self.coeffs['eps'],
+                                                 noise=self.coeffs['noise'])
+        ranking = sorted(list(enumerate(cf_model.edge_index.T)),
+                              key=lambda x: -scores[x[0]])
+        print(*zip(ranking, sorted(-scores)), sep='\n')
+
+        best_distance = np.inf
+        best_loss = np.inf
+        best_cf_example = []
+
+        mask = torch.tensor(torch.ones(edge_index.shape[1]), dtype=bool)
+        for i in range(1, self.epochs):
+            binary_mask = bin(i)[2:]
+            distance = binary_mask.count('1')
+
+            # Zero out edges according to current epoch
+            for bit, j in zip(binary_mask[::-1], ranking):
+                mask[j[0]] = bit != '1'
+
+            masked_edge_index = edge_index[:, mask]
+            out = model(x, masked_edge_index)[index]
+            new_prediction = torch.argmax(out)
+            loss = out[self.prediction]
+
+            # break same-distance ties using loss for accuracy
+            if new_prediction != self.prediction and \
+                       distance <= best_distance and \
+                                    loss < best_loss:
+                best_distance = distance
+                best_loss = loss
+
+                best_cf_example.append([new_prediction.item(), distance, mask.clone()])
+                if distance == 1:
+                    break
+        return best_cf_example
+
+
+class GreedyCFExplainer(CFExplainer):
+    r"""
+
+    """
+    def _find_cf(self, model, index, x, edge_index):
+        """ Remove edges sequentually in order from most to least important """
+        self.prediction = torch.argmax(model(x, edge_index)[index])
+
+        cf_model = GCNSyntheticPerturbEdgeWeight(model, index, x, edge_index,
+                                                    beta=self.coeffs['beta'])
+
+        edge_scores = cf_model.sample_edge_importance(10,
+                                                      self.coeffs['eps'],
+                                                      self.coeffs['noise'])
+        ranking = sorted(list(enumerate(edge_index.T)), key=lambda x: -edge_scores[x[0]])
+
+        best_cf_example = []
+        mask = torch.tensor(torch.ones(edge_index.shape[1]), dtype=bool)
+        for i in range(1, 5):
+            mask[ranking[i][0]] = False
+
+            masked_edge_index = edge_index[:, mask]
+            new_prediction = torch.argmax(model(x, masked_edge_index)[index])
+
+            if new_prediction != self.prediction:
+                best_cf_example.append([new_prediction.item(), i, mask.clone()])
+                break
+        return best_cf_example
 
 
 # inherit from explainer algorithm pytorch geometric
@@ -424,7 +504,7 @@ class CFExplainerOriginal():
         clip_grad_norm(self.cf_model.parameters(), 2.0)
         self.cf_optimizer.step()
 
-        print(output[self.new_idx], loss_total)
+        # print(output[self.new_idx], loss_total)
         # print(loss_total)
 
         # print('Node idx: {}'.format(self.node_idx),

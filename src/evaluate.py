@@ -23,6 +23,7 @@ def calculate_accuracy_new(df, data, motif_edges_set):
 
     accuracy = []
     for i in range(len(df_motif)):
+        print(df_motif.iloc[i])
         cf_edges = mask_select(data.edge_index, 1, ~torch.tensor(df_motif['cf_mask'][i]))
 
         overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set or \
@@ -33,8 +34,9 @@ def calculate_accuracy_new(df, data, motif_edges_set):
         #     print(df_motif.iloc[i, 0], cf_edges[:,0], accuracy[-1])
 
         # if accuracy[-1] < 1:
+        #     print(df_motif.iloc[i][0])
         #     print(cf_edges)
-        #     print(df_motif.iloc[i])
+        #     print(accuracy[-1])
 
     df_motif['accuracy'] = accuracy
     return df_motif

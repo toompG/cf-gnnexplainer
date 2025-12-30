@@ -151,6 +151,10 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.zero_grad()
             loss.backward()
 
-            importance_scores += self.edge_weight_params.grad
+            for (i, j), g in zip(self.P_edge.T, self.P_vec.grad):
+                i, j = i.item(), j.item()
+                a, b = self.P_map[(i, j)]
+                importance_scores[a] += g
+                importance_scores[b] += g
 
         return importance_scores / num_samples
