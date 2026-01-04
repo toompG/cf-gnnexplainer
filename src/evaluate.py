@@ -130,7 +130,7 @@ def main():
     print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes')
     print(f'Fidelity: {1 - len(cfs) / len(data.test_set):.3f}')
     print(f'Distance: {cfs["distance"].mean():.3f}, std: {cfs["distance"].std():.3f}')
-    print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"] * 2):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
+    print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
     # print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
     # print('')
     df_motif = df_motif.dropna()

@@ -15,9 +15,9 @@ class GraphConvolutionPerturb(nn.Module):
         super(GraphConvolutionPerturb, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.FloatTensor(in_features, out_features))
+        self.weight = Parameter(torch.empty(in_features, out_features))
         if bias is not None:
-            self.bias = Parameter(torch.FloatTensor(out_features))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -60,9 +60,9 @@ class GCNSyntheticPerturb(nn.Module):
         self.P_vec_size = int((self.num_nodes * self.num_nodes - self.num_nodes) / 2)  + self.num_nodes
 
         if self.edge_additions:
-            self.P_vec = Parameter(torch.FloatTensor(torch.zeros(self.P_vec_size)))
+            self.P_vec = Parameter(torch.zeros(self.P_vec_size))
         else:
-            self.P_vec = Parameter(torch.FloatTensor(torch.ones(self.P_vec_size)))
+            self.P_vec = Parameter(torch.ones(self.P_vec_size))
 
         self.reset_parameters()
 
@@ -94,7 +94,7 @@ class GCNSyntheticPerturb(nn.Module):
         # Same as normalize_adj in utils.py except includes P_hat in A_tilde
         self.P_hat_symm = create_symm_matrix_from_vec(self.P_vec, self.num_nodes)      # Ensure symmetry
 
-        A_tilde = torch.FloatTensor(self.num_nodes, self.num_nodes)
+        A_tilde = torch.empty(self.num_nodes, self.num_nodes)
         A_tilde.requires_grad = True
 
         if self.edge_additions:         # Learn new adj matrix directly
