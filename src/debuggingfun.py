@@ -193,6 +193,7 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
 
 
         # print(f"Difference loss: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
+        print(f'loss:{loss_dense} {loss_sparse}')
 
 
         # Backward

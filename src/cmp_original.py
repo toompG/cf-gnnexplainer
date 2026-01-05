@@ -72,7 +72,8 @@ def main():
     print(f'Difference: {torch.sum(output - output_real)}')
 
     explain_new(data, model, cf_model=cf_model, dst=args.dst, beta=0.5,
-                      lr=args.lr, epochs=args.epochs, momentum=args.momentum, eps=args.eps, noise=args.noise)
+                      lr=args.lr, epochs=args.epochs, momentum=args.momentum,
+                      eps=args.eps, noise=args.noise)
 
 
 if __name__ == '__main__':

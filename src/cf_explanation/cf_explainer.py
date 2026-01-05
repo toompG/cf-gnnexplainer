@@ -67,6 +67,7 @@ class CFExplainer(ExplainerAlgorithm):
         else:
             self.index = index
         self.edge_index = edge_index
+        self.x = x
 
         model.eval()
         self.prediction = torch.argmax(model(x, edge_index), dim=1)[self.index]
@@ -85,6 +86,8 @@ class CFExplainer(ExplainerAlgorithm):
 
         sub_x = x[sub_nodes]
         sub_index = mapping if mapping.dim() > 0 else mapping.unsqueeze(0)
+
+        assert (model(x, edge_index)[index] - model(sub_x, sub_edge_index)[sub_index]).abs().sum() < .01
 
         best_cf_example = self._find_cf(model, int(sub_index), sub_x, sub_edge_index)
         if best_cf_example != []:
@@ -131,7 +134,7 @@ class CFExplainer(ExplainerAlgorithm):
 
         # cf_model.original_class = torch.argmax(model(x, edge_index)[index])
 
-        cf_model.reset_parameters(self.coeffs['eps'], 0.0)
+        # cf_model.reset_parameters(self.coeffs['eps'], 0.0)
         cf_optimizer = self._initialize_cf_optimizer(cf_model)
 
         best_cf_example = []
@@ -150,7 +153,13 @@ class CFExplainer(ExplainerAlgorithm):
             )
 
             if new_example and new_example[1] < best_distance:
-                assert(new_example[1] != 0)
+                if new_example[1] == 0:
+                    print(new_example, self.index)
+                    print(model(self.x, self.edge_index)[self.index])
+                    print(model(x, edge_index)[index])
+
+
+                assert new_example[1] != 0
                 best_cf_example.append(new_example)
                 best_distance = new_example[1]
 
@@ -177,7 +186,7 @@ class CFExplainer(ExplainerAlgorithm):
          {======|_|~~~~~~~~~|
         /oO--000""`-OO---OO-'''
 
-        cf_model.train()
+        # cf_model.train()
         cf_optimizer.zero_grad()
 
         # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
@@ -320,12 +329,15 @@ class BFCFExplainer(CFExplainer):
                                                  beta=self.coeffs['beta'])
 
         # create ranking of most important edges
-        scores = cf_model.sample_edge_importance(num_samples=1,
-                                                 eps=self.coeffs['eps'],
-                                                 noise=self.coeffs['noise'])
+        scores = cf_model.sample_edge_importance(num_samples=10,
+                                                 eps=4,
+                                                 noise=.4)
         ranking = sorted(list(enumerate(cf_model.edge_index.T)),
                               key=lambda x: -scores[x[0]])
-        print(*zip(ranking, sorted(-scores)), sep='\n')
+        # print(index)
+        # print(*zip(ranking[:10], sorted(-scores)), sep='\n')
+        # print(ranking[:10])
+        # print(torch.argmax(model(x, edge_index)[index]), self.prediction)
 
         best_distance = np.inf
         best_loss = np.inf
@@ -337,8 +349,20 @@ class BFCFExplainer(CFExplainer):
             distance = binary_mask.count('1')
 
             # Zero out edges according to current epoch
-            for bit, j in zip(binary_mask[::-1], ranking):
-                mask[j[0]] = bit != '1'
+            for n, bit in enumerate(binary_mask[::-1]):
+                if n*2 >= len(ranking):
+                    break
+                mask[ranking[n*2][0]] = bit != '1'
+                mask[ranking[n*2+1][0]] = bit != '1'
+                # mask[ranking[n][0]] = 0 if bit == '1' else 1
+
+                # a = ranking[n*2][1]
+                # b = ranking[n*2+1][1]
+                # print(a,b)
+
+                # assert a[0] == b[1]
+                # assert a[1] == b[0]
+
 
             masked_edge_index = edge_index[:, mask]
             out = model(x, masked_edge_index)[index]
@@ -376,7 +400,7 @@ class GreedyCFExplainer(CFExplainer):
 
         best_cf_example = []
         mask = torch.tensor(torch.ones(edge_index.shape[1]), dtype=bool)
-        for i in range(1, 5):
+        for i in range(1, 9):
             mask[ranking[i][0]] = False
 
             masked_edge_index = edge_index[:, mask]

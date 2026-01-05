@@ -75,9 +75,12 @@ def explain_original(model, data, lr=.1, n_momentum=0.9, epochs=500, device='cpu
 
 
 def explain_new(data, model, cf_model=CFExplainer, dst='results', beta=0.5,
-                lr=0.1, epochs=500, momentum=0.0, eps=1.0, noise=0.0, stop=None):
+                lr=0.1, epochs=500, momentum=0.0, eps=1.0, noise=0.0, stop=None,
+                target=None):
     if stop is None:
         stop = len(data.test_set)
+    if target is None:
+        target = data.test_set
 
     write_to = [False]
 
@@ -100,7 +103,7 @@ def explain_new(data, model, cf_model=CFExplainer, dst='results', beta=0.5,
     )
 
     test_cf_examples = []
-    for n, i in tqdm(list(enumerate(data.test_set))):
+    for n, i in tqdm(list(enumerate(target))):
         if n == stop:
             break
 

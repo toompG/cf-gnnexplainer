@@ -20,15 +20,15 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.original_class = torch.argmax(model(x, edge_index)[index])
 
         # Initialize edge weight parameters
-        self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
+        self.P_vec = Parameter(torch.ones(edge_index.shape[1]))
         self.reset_parameters()
 
     def reset_parameters(self, eps=1.0, noise=0.0):
         """Initialize edge weight parameters"""
         with torch.no_grad():
-            self.edge_weight_params.data.fill_(eps)
+            self.P_vec.data.fill_(eps)
             if noise > 0.:
-                self.edge_weight_params += (.5 - torch.rand_like(self.edge_weight_params)) * noise
+                self.P_vec += (.5 - torch.rand_like(self.P_vec)) * noise
 
     def reset_dataset(self, index, model=None, x=None, edge_index=None):
         self.index = index
@@ -39,9 +39,9 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.x = x
         if edge_index is not None:
             self.edge_index = edge_index
-            self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
+            self.P_vec = Parameter(torch.ones(edge_index.shape[1]))
 
-        self.original_class = torch.argmax(self.model(self.x, self.edge_index)[index])
+        self.original_class = torch.argmax(self.model(self.x, self.P_vec)[index])
         self.reset_parameters()
 
     def forward(self):
@@ -49,7 +49,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         predict class with edges weighted between 0 and 1
         """
         return self.model(self.x, self.edge_index,
-                          edge_weights=torch.sigmoid(self.edge_weight_params))[self.index]
+                          edge_weights=torch.sigmoid(self.P_vec))[self.index]
 
     def forward_hard(self):
         """
@@ -57,7 +57,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         """
 
         # Threshold edge weights at 0.5
-        edge_weights_soft = torch.sigmoid(self.edge_weight_params)
+        edge_weights_soft = torch.sigmoid(self.P_vec)
         self.edge_mask = (edge_weights_soft >= 0.5)
         self.masked_edge_index = self.edge_index[:, self.edge_mask]
 
@@ -81,26 +81,23 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
 
         return loss_total, pred_same, loss_graph_dist, self.edge_mask
 
-    def get_weights(self):
-        return self.edge_weight_params
-
     def sample_edge_importance(self, num_samples=5, eps=4.0, noise=0.4):
         """
         Measure average gradient change over multiple samples
         """
-        importance_scores = torch.zeros_like(self.edge_weight_params)
+        importance_scores = torch.zeros_like(self.P_vec)
 
         for _ in range(num_samples):
             self.reset_parameters(eps=eps, noise=noise)
 
             # Forward pass
             output = self.forward()
-            self.edge_mask = torch.ones_like(self.edge_weight_params, dtype=bool)
+            self.edge_mask = torch.ones_like(self.P_vec, dtype=bool)
             loss, _, _, _ = self.loss(output, self.original_class)
 
             self.zero_grad()
             loss.backward()
 
-            importance_scores += self.edge_weight_params.grad
+            importance_scores += self.P_vec.grad
 
         return importance_scores / num_samples

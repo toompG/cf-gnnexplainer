@@ -68,7 +68,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         with torch.no_grad():
             self.P_vec.data.fill_(eps)
             if noise > 0.:
-                self.P_vec += (.5 - torch.rand_like(self.edge_weight_params)) * noise
+                self.P_vec += (.5 - torch.rand_like(self.P_vec)) * noise
 
     def reset_dataset(self, index, model=None, x=None, edge_index=None):
         self.index = index
@@ -79,7 +79,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.x = x
         if edge_index is not None:
             self.edge_index = edge_index
-            self.edge_weight_params = Parameter(torch.ones(edge_index.shape[1]))
+            self.edge_weight_params = torch.ones(edge_index.shape[1])
 
         self.original_class = torch.argmax(self.model(self.x, self.edge_index)[index])
         self.reset_parameters()
@@ -97,8 +97,8 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         predict original model with edge deletion
         """
 
-        # Threshold edge weights at 0.5
-        self.edge_mask = (self.edge_weight_params >= 0)
+        # Threshold edge weights at 0 (equivalent to doing sigmoid then 0.5)
+        self.edge_mask = (self.edge_weight_params > 0)
         self.masked_edge_index = self.matched_edges[:, self.edge_mask]
 
         return self.model(self.x, self.masked_edge_index)[self.index]
