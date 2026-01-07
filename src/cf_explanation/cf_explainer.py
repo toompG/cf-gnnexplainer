@@ -165,7 +165,7 @@ class CFExplainer(ExplainerAlgorithm):
 
                 # skip when optimal cf found
                 return best_cf_example
-        return []
+        return best_cf_example
 
     def cf_train(
         self,

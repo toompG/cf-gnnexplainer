@@ -96,3 +96,38 @@ def redo_dataset_pgexplainer_format(dataset, train_idx, test_idx):
 
     dataset.data.train_mask = index_to_mask(train_idx, size=dataset.data.num_nodes)
     dataset.data.test_mask = index_to_mask(test_idx[len(test_idx)], size=dataset.data.num_nodes)
+
+
+def remove_bidirectional_edges(edge_index):
+    edges = edge_index.numpy().T
+
+    sorted_edges = np.sort(edges, axis=1)
+    _, indices = np.unique(sorted_edges, axis=0, return_index=True)
+
+    result = edges[indices]
+
+    return torch.tensor(result).t().contiguous()
+
+
+def reorder_edges(edge_index):
+    P_edge = remove_bidirectional_edges(edge_index)
+    matched_edges = torch.concat((P_edge, reversed(P_edge)), dim=1)
+
+    P_map = []
+    for i, j in P_edge.T:
+        i, j = i.item(), j.item()
+
+        # Find edge (i,j) using tensor operations
+        edge_mask_ij = (edge_index[0] == i) & (edge_index[1] == j)
+        edge_mask_ji = (edge_index[0] == j) & (edge_index[1] == i)
+
+        # Get the index of the first occurrence
+        idx_ij = torch.nonzero(edge_mask_ij, as_tuple=True)[0]
+        idx_ji = torch.nonzero(edge_mask_ji, as_tuple=True)[0]
+
+        # Convert to scalar or -1 if not found
+        idx_ij = idx_ij[0].item() if len(idx_ij) > 0 else -1
+        idx_ji = idx_ji[0].item() if len(idx_ji) > 0 else -1
+
+        P_map.append((idx_ij, idx_ji))
+    return P_map, matched_edges

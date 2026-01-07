@@ -56,7 +56,7 @@ class SmolGCN(torch.nn.Module):
         return F.log_softmax(x2, dim=1)
 
 
-def train_model(data, device, end=200):
+def train_model(data, device, end=200, save=False):
     ''' Train GCN model '''
     model = GCN(data.num_features, data.num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=.001)
@@ -78,6 +78,8 @@ def train_model(data, device, end=200):
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
 
+    if save == True:
+        torch.save(model.state_dict(), "../models/sparse_gcn_3layer_syn4.pt")
     return model
 
 
@@ -110,7 +112,7 @@ def main():
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
     data = load_dataset(graph_data_path, device)
-    model = train_model(data, device, end=1000)
+    model = train_model(data, device, end=1000, save=True)
     model.eval()
 
     output = model(data.x, data.edge_index)

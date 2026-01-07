@@ -3,17 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 import numpy as np
-
-
-def remove_bidirectional_edges(edge_index):
-    edges = edge_index.numpy().T
-
-    sorted_edges = np.sort(edges, axis=1)
-    _, indices = np.unique(sorted_edges, axis=0, return_index=True)
-
-    result = edges[indices]
-
-    return torch.tensor(result).t().contiguous()
+from utils.utils import reorder_edges
 
 
 class GCNSyntheticPerturbEdgeWeight(nn.Module):
@@ -30,35 +20,13 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.beta = beta
         self.symmetric = symmetric
 
-        if symmetric:
-            self.P_edge = remove_bidirectional_edges(edge_index)
-            self.matched_edges = torch.concat((self.P_edge, reversed(self.P_edge)), dim=1)
-            self.P_middle = self.P_edge.shape[1]
-
-            self.result = torch.ones(edge_index.shape[1])
-
-            self.P_map = []
-            for i, j in self.P_edge.T:
-                i, j = i.item(), j.item()
-
-                # Find edge (i,j) using tensor operations
-                edge_mask_ij = (edge_index[0] == i) & (edge_index[1] == j)
-                edge_mask_ji = (edge_index[0] == j) & (edge_index[1] == i)
-
-                # Get the index of the first occurrence
-                idx_ij = torch.nonzero(edge_mask_ij, as_tuple=True)[0]
-                idx_ji = torch.nonzero(edge_mask_ji, as_tuple=True)[0]
-
-                # Convert to scalar or -1 if not found
-                idx_ij = idx_ij[0].item() if len(idx_ij) > 0 else -1
-                idx_ji = idx_ji[0].item() if len(idx_ji) > 0 else -1
-
-                self.P_map.append((idx_ij, idx_ji))
+        self.result = torch.ones(edge_index.shape[1])
+        self.P_map, self.matched_edges = reorder_edges(edge_index)
 
         with torch.no_grad():
             self.original_class = torch.argmax(model(x, edge_index)[index])
 
-        self.P_vec = Parameter(torch.ones(self.P_edge.shape[1]))
+        self.P_vec = Parameter(torch.ones(self.edge_index.shape[1] // 2))
         self.edge_weight_params = torch.ones(edge_index.shape[1])
 
         self.reset_parameters()
@@ -106,17 +74,13 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
     def loss(self, output, y_new):
         pred_same = float(y_new == self.original_class)
 
-        # Ensure proper dimensions for loss computation
         output = output.unsqueeze(0)
         y_pred_orig = self.original_class.unsqueeze(0)
 
-        # Get current edge weights
-        loss_graph_dist = (~self.edge_mask).sum().float() / 2 # Count removed edges
+        loss_graph_dist = (~self.edge_mask).sum() / 2
 
         # Prediction loss (negative to maximize distance from original prediction)
         loss_pred = -F.nll_loss(output, y_pred_orig)
-
-        # Total loss: only apply pred_same when prediction changes
         loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
 
         if pred_same == 0 and self.symmetric:
