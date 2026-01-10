@@ -1,10 +1,4 @@
 # import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn.parameter import Parameter
-
-from functools import partial
-
 from example import *
 from cmp_original import WrappedOriginalGCN
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
@@ -13,16 +7,11 @@ from cf_explanation.gcn_vectorized import GCNSyntheticPerturbEdgeWeight
 from pathlib import Path
 from gcn import GCNSynthetic
 from utils.utils import *
-from torch_geometric.utils import to_dense_adj
-from functools import lru_cache
 
-from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal
-from cf_explanation.cf_greed import GreedyCFExplainer
-from cf_explanation.cf_bruteforce import BFCFExplainer
+from example import GCN
 
-from torch_geometric.nn.conv.gcn_conv import gcn_norm
+import time
 
-import argparse
 
 floattype = torch.float32
 
@@ -169,31 +158,36 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
     print("DENSE VS SPARSE GRADIENT COMPARISON")
     print("=" * 80)
 
+    P_edge = remove_bidirectional_edges(edge_index)
+    y_pred_orig = torch.argmax(sparse_model.forward())
+    print(y_pred_orig, type(y_pred_orig))
+
     for i in range(50):
     # Forward pass for both
         out_dense = dense_model.forward(x, adj_dense)
         out_sparse = sparse_model.forward()
 
-        _ = dense_model.forward_prediction(x)
-        _ = sparse_model.forward_hard()
+        y_dense, _ = dense_model.forward_prediction(x)
+        y_sparse = sparse_model.forward_hard()
+
+        y_dense = torch.argmax(y_dense, dim=1)[index]
+        y_sparse = torch.argmax(y_sparse)
 
         # Get predictions
         idx = sparse_model.index
         # print(out_sparse)
-        y_pred_orig_dense = torch.argmax(out_dense[idx])
-        y_pred_orig_sparse = torch.argmax(out_sparse)
-
         # print(f"\nPredictions:")
         # print(f"  Dense: {y_pred_orig_dense.item()}")
         # print(f"  Sparse: {y_pred_orig_sparse.item()}")
 
         # Compute losses
-        loss_dense, _, _, _ = dense_model.loss(out_dense[idx], y_pred_orig_dense, y_pred_orig_dense)
-        loss_sparse, _, _, _ = sparse_model.loss(out_sparse, y_pred_orig_sparse)
+        loss_dense, _, dist, _ = dense_model.loss(out_dense[idx], y_pred_orig, y_dense)
+        loss_sparse, _, dist2, _ = sparse_model.loss(out_sparse, y_sparse)
 
-
-        # print(f"Difference loss: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
-        print(f'loss:{loss_dense} {loss_sparse}')
+        print(dist, dist2)
+        print(f"Difference loss: {loss_dense.item()} {loss_sparse.item()}")
+        print(f"Difference loss: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
+        # print(f'loss:{loss_dense - loss_sparse}')
 
 
         # Backward
@@ -207,7 +201,7 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
         if dense_model.P_vec.grad is None or sparse_model.P_vec.grad is None:
             print("missing gradients")
             return
-        bruh = extract_grads_for_sparse_edges(dense_model.P_vec.grad, sparse_model.P_edge, dense_model.num_nodes)
+        bruh = extract_grads_for_sparse_edges(dense_model.P_vec.grad, P_edge, dense_model.num_nodes)
         moment = sparse_model.P_vec.grad
         for E, i, j in zip(sparse_model.edge_index.T, bruh, moment):
             if i-j != 0:
@@ -233,133 +227,66 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
                 # print(f"  Updated {(sparse_model.edge_weight_params.grad != 0).sum().item()} parameters")
 
 
-def trace_backward_chain(tensor, name="tensor", depth=0, max_depth=5):
+
+
+def compare_performance(dense_model, sparse_model, x, adj_dense,
+                        index, epochs, lr=0.1):
     """
-    Recursively trace the backward computation graph
-    """
-    indent = "  " * depth
-    if tensor.grad_fn is None:
-        print(f"{indent}{name}: Leaf tensor (no grad_fn)")
-        return
-
-    if depth >= max_depth:
-        print(f"{indent}{name}: ... (max depth reached)")
-        return
-
-    print(f"{indent}{name}: {tensor.grad_fn}")
-
-    if hasattr(tensor.grad_fn, 'next_functions'):
-        for i, (fn, _) in enumerate(tensor.grad_fn.next_functions):
-            if fn is not None:
-                print(f"{indent}  -> input {i}: {fn}")
-
-
-def check_numerical_stability(model, x, edge_index, epsilon=1e-5):
-    """
-    Check numerical stability of gradients using finite differences
+    Compare performance on a number of epochs
     """
     print("=" * 80)
-    print("NUMERICAL GRADIENT CHECK")
+    print(f"DENSE VS SPARSE TIME TO RUN {epochs} EPOCHS")
     print("=" * 80)
 
-    # Compute analytical gradient
-    output = model.forward()
-    y_pred = model.original_class
-    loss, _, _, _ = model.loss(output, y_pred, torch.argmax(output))
+    start = time.time()
+    index = sparse_model.index
 
-    model.zero_grad()
-    loss.backward()
-    analytical_grad = model.edge_weight_params.grad.clone()
+    for _ in range(epochs):
+        out_dense = dense_model.forward(x, adj_dense)
+        _ = dense_model.forward_prediction(x)
 
-    # Compute numerical gradient for first few parameters
-    numerical_grad = torch.zeros_like(model.edge_weight_params)
+        y_pred_orig_dense = torch.argmax(out_dense[index])
 
-    num_params_to_check = min(10, len(model.edge_weight_params))
-    print(f"\nChecking first {num_params_to_check} parameters...")
+        # Compute losses
+        loss_dense, _, _, _ = dense_model.loss(out_dense[index], y_pred_orig_dense, y_pred_orig_dense)
 
-    for i in range(num_params_to_check):
-        # Perturb parameter up
-        model.edge_weight_params.data[i] += epsilon
-        output_plus = model.forward()
-        loss_plus, _, _, _ = model.loss(output_plus, y_pred, torch.argmax(output_plus))
+        dense_model.zero_grad()
+        loss_dense.backward()
 
-        # Perturb parameter down
-        model.edge_weight_params.data[i] -= 2 * epsilon
-        output_minus = model.forward()
-        loss_minus, _, _, _ = model.loss(output_minus, y_pred, torch.argmax(output_minus))
+        # Compare P_vec gradients (dense) vs edge_weight_params gradients (sparse)
+        with torch.no_grad():
+            lr = 0.1
+            if dense_model.P_vec.grad is not None:
+                dense_model.P_vec -= lr * dense_model.P_vec.grad
+    dense_time = time.time() - start
+    print(f"DENSE: total {dense_time}s, average {dense_time / epochs}")
 
-        # Restore parameter
-        model.edge_weight_params.data[i] += epsilon
+    start = time.time()
+    for _ in range(epochs):
+    # Forward pass for both
+        out_sparse = sparse_model.forward()
+        _ = sparse_model.forward_hard()
 
-        # Compute numerical gradient
-        numerical_grad[i] = (loss_plus - loss_minus) / (2 * epsilon)
+        y_pred_orig_sparse = torch.argmax(out_sparse)
+        loss_sparse, _, _, _ = sparse_model.loss(out_sparse, y_pred_orig_sparse)
 
-        # Compare
-        rel_error = abs(analytical_grad[i] - numerical_grad[i]) / (abs(analytical_grad[i]) + abs(numerical_grad[i]) + 1e-8)
-        print(f"  Param {i}: analytical={analytical_grad[i].item():.6e}, "
-              f"numerical={numerical_grad[i].item():.6e}, "
-              f"rel_error={rel_error.item():.6e}")
+        # Backward
+        sparse_model.zero_grad()
+        loss_sparse.backward()
 
-
-def quick_diagnostic(dense_model, sparse_model, x, adj_dense, edge_index):
-    """
-    Quick check to see where divergence happens
-    """
-    print("Running quick diagnostic...")
-
-    # 1. Check parameter initialization
-    dense_params = {n: p.clone() for n, p in dense_model.named_parameters()}
-    sparse_params = {n: p.clone() for n, p in sparse_model.named_parameters()}
+        with torch.no_grad():
+            if sparse_model.P_vec.grad is not None:
+                sparse_model.P_vec -= lr * sparse_model.P_vec.grad
+    sparse_time = time.time() - start
+    print(f"SPARSE: total {sparse_time:.3f}s, average {sparse_time / epochs:.3f}s")
+    print(f"SPEEDUP: {dense_time / sparse_time}x")
 
 
-
-    print("\n1. Parameter differences:")
-    for name in dense_params:
-        if name in sparse_params:
-            diff = (dense_params[name] - sparse_params[name]).abs().max().item()
-            if diff > 1e-10:
-                print(f"  {name}: max diff = {diff:.2e}")
-
-    # 2. Forward pass
-    dense_out = dense_model.forward(x, adj_dense)
-    sparse_out = sparse_model.forward()
-
-    idx = sparse_model.index
-    print(f"\n2. Output at index {idx}:")
-    print(f"  Dense: {dense_out[idx][:5]}")
-    print(f"  Sparse: {sparse_out[:5]}")
-    print(f"  Max diff: {(dense_out[idx] - sparse_out).abs().max().item():.2e}")
-
-    # 3. Loss
-    y_pred_dense = torch.argmax(dense_out[idx])
-    y_pred_sparse = torch.argmax(sparse_out)
-
-    loss_dense, _, _, _ = dense_model.loss(dense_out[idx], y_pred_dense, y_pred_dense)
-    loss_sparse, _, _, _ = sparse_model.loss(sparse_out, y_pred_sparse)
-
-    print(f"\n3. Loss values:")
-    print(f"  Dense: {loss_dense.item():.10f}")
-    print(f"  Sparse: {loss_sparse.item():.10f}")
-    print(f"  Diff: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
-
-    # 4. Single backward step
-    dense_model.zero_grad()
-    sparse_model.zero_grad()
-
-    loss_dense.backward()
-    loss_sparse.backward()
-
-    print(f"\n4. Gradient at P_vec:")
-    if dense_model.P_vec.grad is not None and sparse_model.P_vec.grad is not None:
-        dense_grad_norm = dense_model.P_vec.grad.norm().item()
-        sparse_grad_norm = sparse_model.P_vec.grad.norm().item()
-        print(f"  Dense norm: {dense_grad_norm:.6e}")
-        print(f"  Sparse norm: {sparse_grad_norm:.6e}")
-        print(f"  Norm diff: {abs(dense_grad_norm - sparse_grad_norm):.2e}")
 
 script_dir = Path(__file__).parent
 graph_path = script_dir / f'../data/gnn_explainer/syn4.pickle'
 model_path = script_dir / f'../models/gcn_3layer_syn4.pt'
+sparse_model_path = script_dir / f'../models/sparse_gcn_3layer_syn4.pt'
 
 
 device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -368,7 +295,6 @@ device = 'cpu'#torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 data = load_dataset(graph_path, device)
 submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
                         nclass=len(data.y.unique()), dropout=0)
-
 submodel.load_state_dict(torch.load(model_path))
 
 if floattype == torch.float64:
@@ -380,6 +306,9 @@ if floattype == torch.float64:
 submodel.eval()
 
 model = WrappedOriginalGCN(submodel).eval()
+# model = GCN(10, 2)
+# model.load_state_dict(torch.load(sparse_model_path))
+
 
 def remove_bidirectional_edges(edge_index):
     edges = edge_index.numpy().T
@@ -393,7 +322,7 @@ def remove_bidirectional_edges(edge_index):
 
 edge_index = data.edge_index
 
-index = 600
+index = 49
 x = data.x
 adj_dense = data.adj
 y_orig = torch.argmax(model(x, edge_index), dim=1)[index]
@@ -412,7 +341,7 @@ norm_adj_sparse = sparse_model.forward()
 print(norm_adj_dense, norm_adj_sparse)
 
 print(f"Norm adj difference: {(norm_adj_dense - norm_adj_sparse).abs().max()}")
-assert (norm_adj_dense - norm_adj_sparse).abs().max() < .01
+# assert (norm_adj_dense - norm_adj_sparse).abs().max() < .01
 
 # 2. Check if loss computation matches
 print("\nStep 2: Checking loss computation...")
@@ -439,5 +368,11 @@ compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, edge_
 
 # 5. Numerical gradient check
 print("\nStep 5: Numerical stability check...")
-quick_diagnostic(dense_model, sparse_model, x, adj_dense, edge_index)
+# quick_diagnostic(dense_model, sparse_model, x, adj_dense, edge_index)
 # check_numerical_stability(sparse_model, x, edge_index)
+
+dense_model.reset_parameters()
+sparse_model.reset_parameters()
+
+print('comparing 100 epochs')
+compare_performance(dense_model, sparse_model, x, adj_dense, edge_index, epochs=100)

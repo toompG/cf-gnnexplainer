@@ -6,7 +6,7 @@ from torch_geometric.nn import GCNConv, Linear
 
 from gcn import GCNSynthetic
 from utils.utils import get_degree_matrix, dense_to_sparse
-from utils.test_functions import load_dataset, explain_new, explain_original
+from utils.test_functions import load_dataset
 
 def edge_index2norm_adj(edge_index, edge_weights=None, num_nodes=None):
     ''' convert edge_index and edge_weight into normalised form the original model
@@ -44,10 +44,10 @@ class WrappedOriginalGCN(torch.nn.Module):
 
     def forward(self, x, edge_index, edge_weights=None):
         num_nodes = x.shape[0]
-        return self.submodel(x, edge_index2norm_adj(edge_index, edge_weights, num_nodes))
+        out = self.submodel(x, edge_index2norm_adj(edge_index, edge_weights, num_nodes))
+        return out
 
-
-class GCNBruh(torch.nn.Module):
+class GCNSyntheticPyG(torch.nn.Module):
     def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
         super().__init__()
         self.gc1 = GCNConv(num_features, n_hid, normalize=False, bias=False)
@@ -65,12 +65,40 @@ class GCNBruh(torch.nn.Module):
     def forward(self, x, edge_index, edge_weights=None):
         edge_index, edge_weights = dense_to_sparse(edge_index)
 
-        x1 = self.gc1(x, edge_index, edge_weight=edge_weights) + self.bias1
-        x1 = x1.relu()
+        x1 = F.relu(self.gc1(x, edge_index, edge_weight=edge_weights) + self.bias1)
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
 
-        x2 = self.gc2(x1, edge_index, edge_weight=edge_weights) + self.bias2
-        x2 = x2.relu()
+        x2 = F.relu(self.gc2(x1, edge_index, edge_weight=edge_weights) + self.bias2)
+        x2 = F.dropout(x2, p=self.dropout, training=self.training)
+
+        x3 = self.gc3(x2, edge_index, edge_weight=edge_weights) + self.bias3
+        x3 = F.dropout(x3, training=self.training)
+
+        x = self.lin(torch.cat((x1, x2, x3), dim=1))
+        return F.log_softmax(x, dim=1)
+
+class GCNSyntheticUnNormedPyG(torch.nn.Module):
+    def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
+        super().__init__()
+        self.gc1 = GCNConv(num_features, n_hid, bias=False)
+        self.gc2 = GCNConv(n_hid, n_hid, bias=False)
+        self.gc3 = GCNConv(n_hid, n_out, bias=False)
+
+        # Manual bias parameters to match original behavior
+        self.bias1 = Parameter(torch.zeros(n_hid))
+        self.bias2 = Parameter(torch.zeros(n_hid))
+        self.bias3 = Parameter(torch.zeros(n_out))
+
+        self.lin = Linear(2 * n_hid + n_out, num_classes)
+        self.dropout = dropout
+
+    def forward(self, x, edge_index, edge_weights=None):
+        edge_index, _ = dense_to_sparse(edge_index)
+
+        x1 = F.relu(self.gc1(x, edge_index, edge_weight=edge_weights) + self.bias1)
+        x1 = F.dropout(x1, p=self.dropout, training=self.training)
+
+        x2 = F.relu(self.gc2(x1, edge_index, edge_weight=edge_weights) + self.bias2)
         x2 = F.dropout(x2, p=self.dropout, training=self.training)
 
         x3 = self.gc3(x2, edge_index, edge_weight=edge_weights) + self.bias3
@@ -80,7 +108,7 @@ class GCNBruh(torch.nn.Module):
         return F.log_softmax(x, dim=1)
 
 def main():
-    model = GCNBruh(10, 2, 20, 20)
+    model = GCNSyntheticPyG(10, 2, 20, 20)
 
     # model_weights = torch.load('../models/gcn_3layer_syn4.pt')
 
@@ -100,18 +128,51 @@ def main():
     }
     model.load_state_dict(new_state_dict)
     model.eval()
+    model.double()
+
+    torch.set_default_dtype(torch.float64)
+
+    bruhh = GCNSyntheticUnNormedPyG(10, 2, 20, 20)
+    bruhh.load_state_dict(new_state_dict)
+    bruhh.eval()
+    bruhh.double()
 
     normal_model = GCNSynthetic(10, 20, 20, 2, 0.0)
     normal_model.load_state_dict(old_state_dict)
+    normal_model.double()
+    # data.norm_adj = data.norm_adj.double()
     data = load_dataset('../data/gnn_explainer/syn4.pickle', device='cpu')
 
-    y_pred = model(data.x, data.norm_adj)
+    y_pred = bruhh(data.x.double(), data.adj.double())
+    y_pred_normal = model(data.x.double(), data.norm_adj.double())
+    difference = abs(y_pred - y_pred_normal)
 
-    print((torch.argmax(y_pred, dim=1) == data.y).float().mean())
-    y_pred_normal = normal_model(data.x, data.norm_adj)
-    print(y_pred - y_pred_normal)
+    # print(y_pred - y_pred_normal)
 
-    explain_original(model, data)
+
+    print(f'accuracy:   {((torch.argmax(y_pred, dim=1)) == data.y).float().mean()}')
+    print(f'similarity: {(torch.argmax(y_pred, dim=1) == torch.argmax(y_pred_normal, dim=1)).float().mean()}')
+    print(f'mean difference: {difference.mean()}, std {difference.std()})')
+
+
+    edge_weights = torch.sigmoid(torch.ones(data.edge_index.shape[1]))
+    A_tilde = F.sigmoid(torch.ones_like(data.norm_adj)) * data.adj.double() + torch.eye(data.norm_adj.shape[0])
+    D_tilde = get_degree_matrix(A_tilde).detach()       # Don't need gradient of this
+    # Raise to power -1/2, set all infs to 0s
+    D_tilde_exp = D_tilde ** (-1 / 2)
+    D_tilde_exp[torch.isinf(D_tilde_exp)] = 0
+
+    norm_adj = torch.mm(torch.mm(D_tilde_exp, A_tilde), D_tilde_exp)
+    print(norm_adj)
+
+        # Use sigmoid to bound P_hat in [0,1]
+    y_pred = bruhh(data.x.double(), data.adj.double(), edge_weights)
+    y_pred_normal = model(data.x.double(), norm_adj)
+    difference = abs(y_pred - y_pred_normal)
+
+    print(f'accuracy:   {((torch.argmax(y_pred, dim=1)) == data.y).float().mean()}')
+    print(f'similarity: {(torch.argmax(y_pred, dim=1) == torch.argmax(y_pred_normal, dim=1)).float().mean()}')
+    print(f'mean difference: {difference.mean()}, std {difference.std()})')
 
 
 if __name__ == '__main__':

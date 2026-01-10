@@ -84,7 +84,7 @@ class CFExplainer(ExplainerAlgorithm):
         self.sub_to_full_edge_mask = edge_mask
         self.full_edge_count = edge_index.shape[1]
 
-        sub_x = x[sub_nodes]
+        sub_x = x[sub_nodes] #! remove for explaining model with diverse features
         sub_index = mapping if mapping.dim() > 0 else mapping.unsqueeze(0)
 
         assert (model(x, edge_index)[index] - model(sub_x, sub_edge_index)[sub_index]).abs().sum() < .01
@@ -400,8 +400,11 @@ class GreedyCFExplainer(CFExplainer):
 
         best_cf_example = []
         mask = torch.tensor(torch.ones(edge_index.shape[1]), dtype=bool)
-        for i in range(1, 9):
+        for i in range(0, 20, 2):
+            if i >= mask.shape[0]:
+                break
             mask[ranking[i][0]] = False
+            mask[ranking[i+1][0]] = False
 
             masked_edge_index = edge_index[:, mask]
             new_prediction = torch.argmax(model(x, masked_edge_index)[index])

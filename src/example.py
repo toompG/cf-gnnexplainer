@@ -22,20 +22,22 @@ columns = ['node', 'label', 'prediction', 'cf_prediction',
 class GCN(torch.nn.Module):
     def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
         super().__init__()
-        self.conv1 = GCNConv(num_features, n_hid)
-        self.conv2 = GCNConv(n_hid, n_hid)
-        self.conv3 = GCNConv(n_hid, n_out)
+        self.conv1 = GCNConv(num_features, n_hid, bias=False)
+        self.conv2 = GCNConv(n_hid, n_hid, bias=False)
+        self.conv3 = GCNConv(n_hid, n_out, bias=False)
         self.lin = nn.Linear(2 * n_hid + n_out, num_classes)
         self.dropout = dropout
 
-    def forward(self, x, edge_index, edge_weights=None):
-        x1 = self.conv1(x, edge_index, edge_weight=edge_weights).relu()
-        x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = self.conv2(x1, edge_index, edge_weight=edge_weights).relu()
-        x2 = F.dropout(x2, p=self.dropout, training=self.training)
-        x3 = self.conv3(x2, edge_index)
-        x3 = F.dropout(x3, training=self.training)
+        self.bias1 = nn.Parameter(torch.zeros(n_hid))
+        self.bias2 = nn.Parameter(torch.zeros(n_hid))
+        self.bias3 = nn.Parameter(torch.zeros(n_out))
 
+    def forward(self, x, edge_index, edge_weights=None):
+        x1 = F.relu(self.conv1(x, edge_index, edge_weight=edge_weights) + self.bias1)
+        x1 = F.dropout(x1, p=self.dropout, training=self.training)
+        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weights).relu() + self.bias2)
+        x2 = F.dropout(x2, p=self.dropout, training=self.training)
+        x3 = F.relu(self.conv3(x2, edge_index, edge_weights) + self.bias3)
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
@@ -51,45 +53,50 @@ class SmolGCN(torch.nn.Module):
         x1 = self.conv1(x, edge_index, edge_weight=edge_weights).relu()
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
         x2 = self.conv2(x1, edge_index, edge_weight=edge_weights)
-        # x2 = F.dropout(x2, p=self.dropout, training=self.training)
 
         return F.log_softmax(x2, dim=1)
 
 
 def train_model(data, device, end=200, save=False):
     ''' Train GCN model '''
-    model = GCN(data.num_features, data.num_classes).to(device)
+    model = GCN(data.num_features, data.num_classes, dropout=0.0).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=.001)
 
-    # syn1: lr=0.005 decay=0.001
+    # syn1: lr=0.01 decay=0.001
     # syn4: lr=0.005 decay=0.001
 
 
     train_mask = torch.zeros(data.num_nodes , dtype=torch.bool, device=device)
     train_mask[data.train_set] = True
 
-    for _ in range(end):
+    for i in range(end):
         model.train()
         optimizer.zero_grad()
         out = model(data.x, data.edge_index)
         loss = F.nll_loss(out[train_mask], data.y[train_mask])
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
         optimizer.step()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+        if i % 50 == 0:
+            print(torch.sum(torch.argmax(out, dim=1) == data.y))
+
 
     if save == True:
-        torch.save(model.state_dict(), "../models/sparse_gcn_3layer_syn4.pt")
+        torch.save(model.state_dict(), "../models/sparse_gcn_3layer_syn1.pt")
     return model
 
+# syn1 .005 .9357
+# syn4 .005 .8990
+# syn5 .001 .8083
 
 def main():
     script_dir = Path(__file__).parent
-    graph_data_path = script_dir / '../data/gnn_explainer/syn4.pickle'
+    graph_data_path = script_dir / '../data/gnn_explainer/syn1.pickle'
     graph_data_path = graph_data_path.resolve()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int, default=20, help='Random seed.')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
     parser.add_argument('--dst', type=str, default='results')
     parser.add_argument('--cf', type=str, default='cf')
 
@@ -112,7 +119,7 @@ def main():
     # data, dataset = get_dataset(nodes=n_nodes_graph, motifs = n_motifs, device=device)
 
     data = load_dataset(graph_data_path, device)
-    model = train_model(data, device, end=1000, save=True)
+    model = train_model(data, device, end=1000, save=False)
     model.eval()
 
     output = model(data.x, data.edge_index)
