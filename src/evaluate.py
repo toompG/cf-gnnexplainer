@@ -4,7 +4,7 @@ import pandas as pd
 
 import torch
 
-from example import load_dataset
+from utils.test_functions import load_dataset
 from pathlib import Path
 
 from torch_geometric.utils import k_hop_subgraph, mask_select
@@ -17,15 +17,9 @@ def calculate_accuracy_new(df, data, motif_edges_set):
     df_motif = df[df["label"] != 0].reset_index(drop=True)
     df_motif = df_motif[df_motif["prediction"] != 0].reset_index(drop=True)
 
-    # Accuracy defined as proportion of removed edges that were originally between motif nodes.
-    #! Accuracy currently lower because nodes w/o CFs get proportion of all edges in network.
-    #! Filtering for examples yields accuracy of 1 when explaining original model.
-
     accuracy = []
     for i in range(len(df_motif)):
-        # print(df_motif.iloc[i])
-        cf_edges = mask_select(data.edge_index, 1, ~torch.tensor(df_motif['cf_mask'][i]))
-
+        cf_edges = data.edge_index[:, ~df_motif['cf_mask'][i]]
         overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set or \
                                                          (j.item(), i.item()) in motif_edges_set))
         accuracy.append(overlap_count / cf_edges.shape[1])
@@ -33,27 +27,22 @@ def calculate_accuracy_new(df, data, motif_edges_set):
         # if cf_edges.shape[1] < 30:
         #     print(df_motif.iloc[i, 0], cf_edges[:,0], accuracy[-1])
 
-        if accuracy[-1] < 1:
-            print(df_motif.iloc[i][0])
-            print(cf_edges)
-            print(accuracy[-1])
+        # if accuracy[-1] < 1:
+        #     print(df_motif.iloc[i][0])
+        #     print(cf_edges)
+        #     print(accuracy[-1])
 
     df_motif['accuracy'] = accuracy
     return df_motif
 
 
 def calculate_accuracy_original(df, data, motif_nodes):
-        # Filter out nodes with label 0
+    # Filter out nodes with label 0
     df_motif = df[df["prediction"] != 0].reset_index(drop=True)
-    # print(motif_nodes)
-
-    # Accuracy defined as proportion of removed edges that were originally between motif nodes.
-    #! Accuracy currently lower because nodes w/o CFs get proportion of all edges in network.
-    #! Filtering for examples yields accuracy of 1 when explaining original model.
 
     accuracy = []
     for i in range(len(df_motif)):
-        cf_edges = mask_select(data.edge_index, 1, ~torch.tensor(df_motif['cf_mask'][i]))
+        cf_edges = data.edge_index[:, ~df_motif['cf_mask'][i]]
         nodes_involved = np.unique(np.concatenate((cf_edges[0], cf_edges[1]), axis=0))
         nodes_involved = nodes_involved[nodes_involved != df_motif.iloc[i, 0]]
 
@@ -75,11 +64,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dst', type=str, default='results.pkl')
     parser.add_argument('--exp', type=str, default='syn1')
+    parser.add_argument('--compare', default=False, help='Use original model location to verify correctness')
+
     args = parser.parse_args()
 
-    # TODO: support different datasets
-    # TODO: think about subgraph cf method
-
+    if '.pkl' not in args.dst:
+        args.dst = args.dst + '.pkl'
     # Load original graph
     script_dir = Path(__file__).parent
     graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
@@ -115,16 +105,15 @@ def main():
     motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
     df_motif = calculate_accuracy_original(df, data, motif_nodes)
 
+    if args.compare:
+        for i in range(len(cfs)):
+            cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
 
-    for i in range(len(cfs)):
-        # print(cfs['cf_mask'])
-        # cf_edges = data.edge_index[:, mask]
-        cf_edges = mask_select(data.edge_index, 1, torch.tensor(cfs['cf_mask'][i]))
+            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
 
-        # print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
-        # print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+            assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
-        # assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
     print(f'{args.exp} tested at {args.dst}')
     print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes')

@@ -26,26 +26,12 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.P_vec = Parameter(torch.ones(self.edge_index.shape[1] // 2))
         self.reset_parameters()
 
-    def reset_parameters(self, eps=1.0, noise=0.0):
+    def reset_parameters(self, initial=1.0, eps=0.0):
         """Initialize edge weight parameters"""
         with torch.no_grad():
-            self.P_vec.data.fill_(eps)
-            if noise > 0.:
-                self.P_vec += (.5 - torch.rand_like(self.P_vec)) * noise
-
-    # def reset_dataset(self, index, model=None, x=None, edge_index=None):
-    #     self.index = index
-
-    #     if model is not model:
-    #         self.model = model
-    #     if x is not None:
-    #         self.x = x
-    #     if edge_index is not None:
-    #         self.edge_index = edge_index
-    #         self.edge_weight_params = torch.ones(edge_index.shape[1])
-
-    #     self.original_class = torch.argmax(self.model(self.x, self.edge_index)[index])
-    #     self.reset_parameters()
+            self.P_vec.data.fill_(initial)
+            if eps > 0.:
+                self.P_vec += (.5 - torch.rand_like(self.P_vec)) * eps
 
     def forward(self):
         """
@@ -56,7 +42,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.edge_weight_params[self.matched_edges[1]] = self.P_vec
 
         return self.model(self.x, self.edge_index,
-                          edge_weights=torch.sigmoid(self.edge_weight_params))[self.index]
+                          edge_weight=torch.sigmoid(self.edge_weight_params))[self.index]
 
     def forward_hard(self):
         """
@@ -82,24 +68,25 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
 
         return loss_total, pred_same, loss_graph_dist, self.edge_mask
 
-    def sample_edge_importance(self, num_samples=5, eps=4.0, noise=0.4):
+    def score_edges(self, num_samples=5, initial=1.0, eps=0.0):
         """
         Measure average gradient change over multiple samples
         """
-        importance_scores = torch.zeros_like(self.edge_weight_params)
+        importance_scores = torch.zeros(self.P_vec.shape)
 
         for _ in range(num_samples):
-            self.reset_parameters(eps=eps, noise=noise)
+            self.reset_parameters(initial=initial, eps=eps)
 
             # Forward pass
             output = self.forward()
-            self.edge_mask = torch.ones_like(self.edge_weight_params, dtype=bool)
+            self.edge_mask = torch.ones(self.edge_index.shape[1], dtype=bool)
             loss, _, _, _ = self.loss(output, self.original_class)
 
             self.zero_grad()
             loss.backward()
 
-            importance_scores[self.matched_edges[0]] += self.P_vec.grad
-            importance_scores[self.matched_edges[1]] += self.P_vec.grad
+            importance_scores -= self.P_vec.grad
 
-        return importance_scores / num_samples
+        return list(zip(*self.matched_edges)), importance_scores
+
+

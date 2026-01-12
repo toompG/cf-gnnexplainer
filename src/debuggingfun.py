@@ -2,7 +2,7 @@
 from example import *
 from cmp_original import WrappedOriginalGCN
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
-from cf_explanation.gcn_vectorized import GCNSyntheticPerturbEdgeWeight
+from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 
 from pathlib import Path
 from gcn import GCNSynthetic

@@ -14,7 +14,7 @@ from utils.utils import create_symm_matrix_from_vec
 from utils.test_functions import load_dataset
 
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
-from cf_explanation.gcn_vectorized import GCNSyntheticPerturbEdgeWeight
+from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 
 
 floattype = torch.float32

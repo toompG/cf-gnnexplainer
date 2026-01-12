@@ -5,7 +5,8 @@ import torch
 
 from gcn import GCNSynthetic
 from wrapper import WrappedOriginalGCN
-from cf_explanation.cf_explainer import CFExplainer, CFExplainerOriginal, GreedyCFExplainer, BFCFExplainer
+from cf_explanation.cf_explainer import CFExplainerNew, CFExplainer, \
+                                        GreedyCFExplainer, BFCFExplainer
 from utils.test_functions import load_dataset, explain_new, explain_original
 
 
@@ -16,20 +17,19 @@ def main():
     parser.add_argument('--lr', type=float, default=.1)
     parser.add_argument('--momentum', type=float, default=0.0)
     parser.add_argument('--epochs', type=int, default=500)
-    parser.add_argument('--eps', type=float, default=1.0)
-    parser.add_argument('--noise', type=float, default=0.0)
+    parser.add_argument('--eps', type=float, default=0.0)
     parser.add_argument('--seed', type=int, default=20)
     parser.add_argument('--cf', type=str, default='cf')
 
     args = parser.parse_args()
     if args.cf == 'cf':
-        cf_model = CFExplainer
+        cf_model = CFExplainerNew
     elif args.cf == 'greedy':
         cf_model = GreedyCFExplainer
     elif args.cf == 'bf':
         cf_model = BFCFExplainer
     elif args.cf == 'original':
-        cf_model = CFExplainerOriginal
+        cf_model = CFExplainer
     else:
         raise AttributeError('Incorrect cf specified: use cf, greedy, bf or original')
 
@@ -71,9 +71,11 @@ def main():
     print(f'Wrapped accuracy: {train_accuracy}\nOriginal accuracy: {train_accuracy_real}')
     print(f'Difference: {torch.sum(output - output_real)}')
 
-    explain_new(data, model, cf_model=cf_model, dst=args.dst, beta=0.5,
-                      lr=args.lr, epochs=args.epochs, momentum=args.momentum,
-                      eps=args.eps, noise=args.noise)
+    result = explain_new(model, data.x, data.edge_index, data.test_set, data.y, cf_model,
+                n_hops=4, device='cpu', epochs=args.epochs, lr=args.lr,
+                n_momentum=args.momentum, eps=args.eps)
+
+    result.to_pickle(f"../results/{args.dst}.pkl")
 
 
 if __name__ == '__main__':

@@ -18,10 +18,10 @@ from functools import partial
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.test_functions import load_dataset
 from utils.utils import normalize_adj
-from cf_explanation.gcn_vectorized import GCNSyntheticPerturbEdgeWeight
+from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
 from gcn import GCNSynthetic
-from example import GCN
+from gcn_sparse import GCN
 
 
 def get_process_memory():
@@ -44,18 +44,20 @@ def benchmark_node(benchmark_fun, num_trials=5):
 
         # Profile memory usage during training
         train_start = time.perf_counter()
-        mem_usage = memory_usage(
-            (benchmark_fun, ),
-            interval=0.01,  # Sample every 10ms
-            timeout=None,
-            max_usage=False,  # Return full trace
-            retval=True,
-            include_children=True
-        )
+        # mem_usage = memory_usage(
+        #     (benchmark_fun, ),
+        #     interval=0.01,  # Sample every 10ms
+        #     timeout=None,
+        #     max_usage=False,  # Return full trace
+        #     retval=True,
+        #     include_children=True
+        # )
+        explainer, losses = benchmark_fun()
+
         total_train_time = time.perf_counter() - train_start
 
         # mem_usage is tuple: (memory_samples, return_value)
-        memory_samples, (explainer, losses) = mem_usage
+        # memory_samples, (explainer, losses) = mem_usage
 
         mem_after = get_process_memory()
 
@@ -68,10 +70,10 @@ def benchmark_node(benchmark_fun, num_trials=5):
         # Memory metrics (all include C/C++ allocations)
         results['mem_before_mb'].append(mem_before)
         results['mem_after_mb'].append(mem_after)
-        results['mem_peak_mb'].append(max(memory_samples))
-        results['mem_mean_mb'].append(np.mean(memory_samples))
+        # results['mem_peak_mb'].append(max(memory_samples))
+        # results['mem_mean_mb'].append(np.mean(memory_samples))
         results['mem_delta_mb'].append(mem_after - mem_before)
-        results['mem_samples'].append(len(memory_samples))
+        # results['mem_samples'].append(len(memory_samples))
 
     return pd.DataFrame(results)
 
@@ -123,7 +125,7 @@ def train_explainer_dense(model, node_idx, x, adj, n_classes, num_epochs=100):
 
 def benchmark_dataset(data, model, benchmark_fun, dense=False):
     results = []
-    for i in tqdm(data.test_set):
+    for i in tqdm(data.test_set[:20]):
         sub_nodes, sub_edge_index, mapping, _ = k_hop_subgraph(
             int(i),
             4,
@@ -185,7 +187,7 @@ def main():
                    'TreeCycle Sparse', 'TreeCycle Dense']
 
     results = []
-    for i in range(6):
+    for i in range(2):
         benchmark_fun = train_explainer_coo if i % 2 == 0 else train_explainer_dense
 
         result = benchmark_dataset(datasets[i//2], models[i], benchmark_fun, dense=i%2)
@@ -197,4 +199,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    

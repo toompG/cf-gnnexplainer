@@ -19,7 +19,6 @@ torch.set_default_dtype(floattype)
 
 def main():
     exp = 'syn4'
-    idx = torch.tensor([100, 200, 300, 400, 500, 600])
 
     script_dir = Path(__file__).parent
     graph_path = script_dir / f'../../data/gnn_explainer/{exp}.pickle'
@@ -28,6 +27,7 @@ def main():
     device = 'cpu'
 
     data = load_dataset(graph_path, device)
+    idx = data.test_set
     submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
                             nclass=len(data.y.unique()), dropout=0)
     submodel.load_state_dict(torch.load(model_path))
@@ -36,13 +36,12 @@ def main():
     model = WrappedOriginalGCN(submodel)
     model.eval()
 
+    dense = explain_original(submodel, data, target=idx, epochs=500)
+    sparse = explain_new(model, data.x, data.edge_index, idx, data.y, epochs=500)
 
-    dense = explain_original(submodel, data, target=idx)
-    sparse = explain_new(model, data, target=idx)
-
-    print(dense)
-    print(sparse)
-
+    for i, j in zip(dense['cf_mask'], sparse['cf_mask']):
+        assert all(i ^ j == False)
+    print('Success: All counterfactuals were identical!')
 
 if __name__ == '__main__':
     main()

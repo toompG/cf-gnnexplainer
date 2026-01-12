@@ -25,12 +25,12 @@ class GCN(torch.nn.Module):
         self.bias2 = nn.Parameter(torch.zeros(n_hid))
         self.bias3 = nn.Parameter(torch.zeros(n_out))
 
-    def forward(self, x, edge_index, edge_weights=None):
-        x1 = F.relu(self.conv1(x, edge_index, edge_weight=edge_weights) + self.bias1)
+    def forward(self, x, edge_index, edge_weight=None):
+        x1 = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight) + self.bias1)
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weights).relu() + self.bias2)
+        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weight).relu() + self.bias2)
         x2 = F.dropout(x2, p=self.dropout, training=self.training)
-        x3 = F.relu(self.conv3(x2, edge_index, edge_weights) + self.bias3)
+        x3 = F.relu(self.conv3(x2, edge_index, edge_weight) + self.bias3)
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
@@ -42,10 +42,10 @@ class SmolGCN(torch.nn.Module):
         self.conv2 = GCNConv(n_hid, num_classes)
         self.dropout = dropout
 
-    def forward(self, x, edge_index, edge_weights=None):
-        x1 = self.conv1(x, edge_index, edge_weight=edge_weights).relu()
+    def forward(self, x, edge_index, edge_weight=None):
+        x1 = self.conv1(x, edge_index, edge_weight=edge_weight).relu()
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = self.conv2(x1, edge_index, edge_weight=edge_weights)
+        x2 = self.conv2(x1, edge_index, edge_weight=edge_weight)
 
         return F.log_softmax(x2, dim=1)
 
@@ -142,7 +142,6 @@ def main():
     model = train_model(data, device, lr=lr, hidden=hidden, dropout=dropout,
                         weight_decay=weight_decay, clip=clip, end=epochs, dst=args.dst, save=args.save)
     model.eval()
-
 
     output = model(data.x, data.edge_index)
     y_pred_orig = torch.argmax(output, dim=1)
