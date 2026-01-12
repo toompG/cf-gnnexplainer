@@ -148,7 +148,7 @@ class GCNSyntheticPerturb(nn.Module):
 
         # Want negative in front to maximize loss instead of minimizing it to find CFs
         loss_pred = - F.nll_loss(output, y_pred_orig)
-        loss_graph_dist = (cf_adj != self.adj).sum() / 2
+        loss_graph_dist = sum(sum(abs(cf_adj - self.adj))) / 2      # Number of edges changed (symmetrical)
 
         # Zero-out loss_pred with pred_same if prediction flips
         loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
