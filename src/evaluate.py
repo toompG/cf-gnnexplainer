@@ -73,6 +73,7 @@ def main():
     # Load original graph
     script_dir = Path(__file__).parent
     graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+
     model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
     graph_data_path = graph_data_path.resolve()
     data = load_dataset(graph_data_path, device)
@@ -93,41 +94,41 @@ def main():
     # df_motif = df_motif.dropna()
     cfs = df.dropna().reset_index()
 
-    submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
-                            nclass=len(data.y.unique()), dropout=0)
+    # submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+    #                         nclass=len(data.y.unique()), dropout=0)
 
-    submodel.load_state_dict(torch.load(model_path))
-    submodel.eval()
+    # submodel.load_state_dict(torch.load(model_path))
+    # submodel.eval()
 
-    model = WrappedOriginalGCN(submodel).eval()
+    # model = WrappedOriginalGCN(submodel).eval()
 
-    predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
-    motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
-    df_motif = calculate_accuracy_original(df, data, motif_nodes)
+    # predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
+    # motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
+    # df_motif = calculate_accuracy_original(df, data, motif_nodes)
 
-    if args.compare:
-        for i in range(len(cfs)):
-            cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
+    # if args.compare:
+    #     for i in range(len(cfs)):
+    #         cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
 
-            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
-            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+    #         print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+    #         print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
 
-            assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
+    #         assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
 
     print(f'{args.exp} tested at {args.dst}')
-    print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}, {len(df_motif)} non-zero nodes')
+    print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}')
     print(f'Fidelity: {1 - len(cfs) / len(data.test_set):.3f}')
     print(f'Distance: {cfs["distance"].mean():.3f}, std: {cfs["distance"].std():.3f}')
     print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
     # print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
     # print('')
-    df_motif = df_motif.dropna()
+    # df_motif = df_motif.dropna()
     df_motif_new = df_motif_new.dropna()
 
     # print(f'Distance: {df_motif["distance"].mean():.3f}, std: {df_motif["distance"].std():.3f}')
     # print(f'Sparsity: {np.mean(1 - df_motif["distance"] / df_motif["subgraph_size"] * 2):.3f}, std: {np.std(1 - df_motif["distance"] / df_motif["subgraph_size"]):.3f}')
-    print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
+    # print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
     print(f'Accuracy (new): {np.mean(df_motif_new["accuracy"]):.3f}, std: {np.std(df_motif_new["accuracy"]):.3f}')
 
     print('')

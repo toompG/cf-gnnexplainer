@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from torch_geometric.nn import GCNConv
 
-from utils.test_functions import load_dataset
+from utils.test_functions import load_dataset, explain_new
 
 import argparse
 import numpy as np
@@ -80,6 +80,8 @@ def train_model(data, device, lr, hidden, dropout, weight_decay, clip,
 presets = {
     'syn1': {'seed': 42, 'epochs': 1000, 'lr': 0.001, 'hidden': 20,
              'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
+    'syn2': {'seed': 42, 'epochs': 1000, 'lr': 0.005, 'hidden': 20,
+             'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
     'syn4': {'seed': 42, 'epochs': 1000, 'lr': 0.005, 'hidden': 20,
              'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
     'syn5': {'seed': 42, 'epochs': 1500, 'lr': 0.002, 'hidden': 20,
@@ -110,7 +112,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.preset:
+    if args.preset == True:
         seed = presets[args.exp]['seed']
         epochs = presets[args.exp]['epochs']
         lr = presets[args.exp]['lr']
@@ -150,6 +152,10 @@ def main():
     print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
+
+    print(data.edge_index.shape)
+    result = explain_new(model, data.x, data.edge_index, data.test_set[::5], data.y, n_momentum=.9)
+    result.to_pickle(f"../results/syn2.pkl")
 
 
 if __name__ == '__main__':

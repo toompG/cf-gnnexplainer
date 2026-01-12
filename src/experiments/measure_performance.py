@@ -39,25 +39,11 @@ def benchmark_node(benchmark_fun, num_trials=5):
     for trial in range(num_trials):
         mem_before = get_process_memory()
 
-        # Define the training function to profile
 
-
-        # Profile memory usage during training
         train_start = time.perf_counter()
-        # mem_usage = memory_usage(
-        #     (benchmark_fun, ),
-        #     interval=0.01,  # Sample every 10ms
-        #     timeout=None,
-        #     max_usage=False,  # Return full trace
-        #     retval=True,
-        #     include_children=True
-        # )
         explainer, losses = benchmark_fun()
 
         total_train_time = time.perf_counter() - train_start
-
-        # mem_usage is tuple: (memory_samples, return_value)
-        # memory_samples, (explainer, losses) = mem_usage
 
         mem_after = get_process_memory()
 
@@ -67,7 +53,6 @@ def benchmark_node(benchmark_fun, num_trials=5):
         results['total_train_time'].append(total_train_time)
         results['final_loss'].append(losses[-1])
 
-        # Memory metrics (all include C/C++ allocations)
         results['mem_before_mb'].append(mem_before)
         results['mem_after_mb'].append(mem_after)
         # results['mem_peak_mb'].append(max(memory_samples))
@@ -125,7 +110,8 @@ def train_explainer_dense(model, node_idx, x, adj, n_classes, num_epochs=100):
 
 def benchmark_dataset(data, model, benchmark_fun, dense=False):
     results = []
-    for i in tqdm(data.test_set[:20]):
+
+    for i in tqdm(data.test_set[:5]):
         sub_nodes, sub_edge_index, mapping, _ = k_hop_subgraph(
             int(i),
             4,
@@ -156,12 +142,13 @@ def main():
 
     datasets = [
         load_dataset(script_dir / '../../data/gnn_explainer/syn1.pickle', device='cpu'),
+        load_dataset(script_dir / '../../data/gnn_explainer/syn2.pickle', device='cpu'),
         load_dataset(script_dir / '../../data/gnn_explainer/syn4.pickle', device='cpu'),
         load_dataset(script_dir / '../../data/gnn_explainer/syn5.pickle', device='cpu')
     ]
 
     models = []
-    for n, i in enumerate(['syn1', 'syn4', 'syn5']):
+    for n, i in enumerate(['syn1', 'syn2', 'syn4', 'syn5']):
         model_path = script_dir / f'../../models/sparse_gcn_3layer_{i}.pt'
         data = datasets[n]
         model = GCN(10, data.num_classes)
@@ -182,17 +169,27 @@ def main():
         assert (y_pred == data.y).float().mean() > 0.8
         models.append(dense)
 
-    experiments = ['BAShapes Sparse', 'BAShapes Dense',
-                   'TreeGrid Sparse', 'TreeGrid Dense',
-                   'TreeCycle Sparse', 'TreeCycle Dense']
+    experiments = [['BAShapes',    'Sparse', datasets[0], models[0]],
+                   ['BAShapes',    'Dense',  datasets[0], models[1]],
+                   ['BACommunity', 'Sparse', datasets[1], models[2]],
+                   ['BACommunity', 'Dense',  datasets[1], models[3]],
+                   ['TreeGrid',    'Sparse', datasets[2], models[4]],
+                   ['TreeGrid',    'Dense',  datasets[2], models[5]],
+                   ['TreeCycle',   'Sparse', datasets[3], models[6]],
+                   ['TreeCycle',   'Dense',  datasets[3], models[7]]]
 
     results = []
-    for i in range(2):
-        benchmark_fun = train_explainer_coo if i % 2 == 0 else train_explainer_dense
+    for dataset_name, model_type, dataset, model in experiments[:4]:
+        benchmark_fun = train_explainer_coo if model_type == 'Sparse' else train_explainer_dense
 
-        result = benchmark_dataset(datasets[i//2], models[i], benchmark_fun, dense=i%2)
-        result.insert(0, 'dataset', experiments[i])
+        result = benchmark_dataset(dataset, model, benchmark_fun,
+                                   dense = model_type == 'Dense')
+        result.insert(0, 'dataset', ' '.join([dataset_name, model_type]))
         results.append(result)
+
+
+
+        pd.concat(results, ignore_index=True).to_pickle(f'../../results/perf_{dataset_name}_{model_type}.pkl')
 
     pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance.pkl")
 
