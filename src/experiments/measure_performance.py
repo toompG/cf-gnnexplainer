@@ -182,7 +182,7 @@ def main():
 
     experiments = ['BAShapes Sparse', 'BAShapes Dense',
                    'TreeGrid Sparse', 'TreeGrid Dense',
-                   'TreeCycle Sparse', 'TreeGrid Dense']
+                   'TreeCycle Sparse', 'TreeCycle Dense']
 
     results = []
     for i in range(6):
@@ -197,3 +197,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    

@@ -78,7 +78,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         # Predict loss as described in cf ggnexplainer paper
         loss_pred = -F.nll_loss(output, y_pred_orig)
         loss_graph_dist = (~self.edge_mask).sum() / 2
-        loss_total = pred_same * loss_pred + 0 * loss_graph_dist
+        loss_total = pred_same * loss_pred + self.beta * loss_graph_dist
 
         return loss_total, pred_same, loss_graph_dist, self.edge_mask
 

@@ -11,12 +11,6 @@ from utils.utils import get_degree_matrix
 from utils.test_functions import load_dataset
 
 def main():
-
-    # model_weights = torch.load('../models/gcn_3layer_syn4.pt')
-
-    # Load trained weights from GCNSynthetic
-    # old_state_dict = torch.load('../models/gcn_3layer_syn4.pt')
-
     data = load_dataset('../../data/gnn_explainer/syn4.pickle', device='cpu')
 
     deg = get_degree_matrix(data.adj).detach()

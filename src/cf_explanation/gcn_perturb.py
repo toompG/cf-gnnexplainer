@@ -10,7 +10,6 @@ class GraphConvolutionPerturb(nn.Module):
     """
     Similar to GraphConvolution except includes P_hat
     """
-
     def __init__(self, in_features, out_features, bias=True):
         super(GraphConvolutionPerturb, self).__init__()
         self.in_features = in_features
@@ -20,14 +19,6 @@ class GraphConvolutionPerturb(nn.Module):
             self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        'set uninitialized params'
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input, adj):
         support = torch.mm(input, self.weight)
@@ -41,7 +32,6 @@ class GraphConvolutionPerturb(nn.Module):
         return self.__class__.__name__ + ' (' \
                + str(self.in_features) + ' -> ' \
                + str(self.out_features) + ')'
-
 
 
 class GCNSyntheticPerturb(nn.Module):
@@ -86,9 +76,6 @@ class GCNSyntheticPerturb(nn.Module):
             else:
                 torch.sub(self.P_vec, eps)
 
-
-
-
     def forward(self, x, sub_adj):
         self.sub_adj = sub_adj
         # Same as normalize_adj in utils.py except includes P_hat in A_tilde
@@ -116,8 +103,6 @@ class GCNSyntheticPerturb(nn.Module):
         x2 = F.dropout(x2, self.dropout, training=self.training)
         x3 = self.gc3(x2, norm_adj)
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
-
-        # print(x1, x2, x3, x)
         return F.log_softmax(x, dim=1)
 
 
@@ -149,7 +134,7 @@ class GCNSyntheticPerturb(nn.Module):
         return F.log_softmax(x, dim=1), self.P
 
 
-    def  loss(self, output, y_pred_orig, y_pred_new_actual):
+    def loss(self, output, y_pred_orig, y_pred_new_actual):
         pred_same = float(int(y_pred_new_actual) == int(y_pred_orig))
         # Need dim >=2 for F.nll_loss to work
         output = output.unsqueeze(0)
