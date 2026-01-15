@@ -111,7 +111,9 @@ def train_explainer_dense(model, node_idx, x, adj, n_classes, num_epochs=100):
 def benchmark_dataset(data, model, benchmark_fun, dense=False):
     results = []
 
-    for i in tqdm(data.test_set[:5]):
+    test = [*range(data.x.shape[0])]
+    print(len(test))
+    for i in tqdm(data.test):
         sub_nodes, sub_edge_index, mapping, _ = k_hop_subgraph(
             int(i),
             4,
@@ -126,7 +128,7 @@ def benchmark_dataset(data, model, benchmark_fun, dense=False):
         node_results = benchmark_node(
             partial(benchmark_fun, model=model, node_idx=int(sub_index),
                     x=sub_x, adj=adj, n_classes=data.num_classes),
-            num_trials=5
+            num_trials=1
         )
 
         node_results.insert(0, 'node_idx', int(i))

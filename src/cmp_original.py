@@ -51,8 +51,10 @@ def main():
     submodel.eval()
 
     if args.cf == 'original':
-        explain_original(submodel, data,
-                         lr=args.lr, n_momentum=args.momentum, epochs=args.epochs, dst=args.dst)
+        result = explain_original(submodel, data,
+                                  lr=args.lr, n_momentum=args.momentum,
+                                  epochs=args.epochs)
+        result.to_pickle(f"../results/{args.dst}.pkl")
         return
     elif args.cf == 'cf':
         model = WrappedOriginalGCN(submodel).eval()

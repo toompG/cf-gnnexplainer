@@ -1,3 +1,14 @@
+'''
+gcn_sparse.py
+
+gcn_sparse implements a GCN for COO-formatted node classification. Training
+settings for every model used in the experiments are stored and may be
+re-used using
+
+python3 gcn_sparse.py --exp=[DATASET]
+'''
+
+
 import torch.nn.utils
 import torch.nn.functional as F
 import torch.nn as nn
@@ -28,9 +39,9 @@ class GCN(torch.nn.Module):
     def forward(self, x, edge_index, edge_weight=None):
         x1 = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight) + self.bias1)
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weight).relu() + self.bias2)
+        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weight) + self.bias2)
         x2 = F.dropout(x2, p=self.dropout, training=self.training)
-        x3 = F.relu(self.conv3(x2, edge_index, edge_weight) + self.bias3)
+        x3 = self.conv3(x2, edge_index, edge_weight) + self.bias3
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
 
@@ -84,7 +95,7 @@ presets = {
              'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
     'syn4': {'seed': 42, 'epochs': 1000, 'lr': 0.005, 'hidden': 20,
              'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
-    'syn5': {'seed': 42, 'epochs': 1500, 'lr': 0.002, 'hidden': 20,
+    'syn5': {'seed': 42, 'epochs': 1000, 'lr': 0.002, 'hidden': 20,
              'dropout': 0.0, 'weight_decay': 0.001, 'clip': 2.0},
 }
 
@@ -153,9 +164,7 @@ def main():
     print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    print(data.edge_index.shape)
-    result = explain_new(model, data.x, data.edge_index, data.test_set[::5], data.y, n_momentum=.9)
-    result.to_pickle(f"../results/syn2.pkl")
+    explain_new(model, data.x, data.edge_index, data.test_set, data.y)
 
 
 if __name__ == '__main__':

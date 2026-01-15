@@ -37,7 +37,7 @@ def main():
     model.eval()
 
     dense = explain_original(submodel, data, target=idx, epochs=500)
-    sparse = explain_new(model, data.x, data.edge_index, idx, data.y, epochs=500)
+    sparse = explain_new(model, data.x, data.edge_index, data.y, idx, epochs=500)
 
     for i, j in zip(dense['cf_mask'], sparse['cf_mask']):
         assert all(i ^ j == False)

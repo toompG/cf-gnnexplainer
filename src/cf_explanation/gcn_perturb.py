@@ -22,7 +22,7 @@ class GraphConvolutionPerturb(nn.Module):
 
     def forward(self, input, adj):
         support = torch.mm(input, self.weight)
-        output = torch.spmm(adj, support)
+        output = torch.mm(adj, support)
         if self.bias is not None:
             return output + self.bias
         else:
@@ -49,12 +49,12 @@ class GCNSyntheticPerturb(nn.Module):
         # P_hat needs to be symmetric ==> learn vector representing entries in upper/lower triangular matrix and use to populate P_hat later
         self.P_vec_size = int((self.num_nodes * self.num_nodes - self.num_nodes) / 2)  + self.num_nodes
 
-        if self.edge_additions:
-            self.P_vec = Parameter(torch.zeros(self.P_vec_size))
-        else:
-            self.P_vec = Parameter(torch.ones(self.P_vec_size))
+        # if self.edge_additions:
+        #     self.P_vec = Parameter(torch.zeros(self.P_vec_size))
+        # else:
+        self.P_vec = Parameter(torch.ones(self.P_vec_size))
 
-        self.reset_parameters()
+        # self.reset_parameters()
 
         self.gc1 = GraphConvolutionPerturb(nfeat, nhid)
         self.gc2 = GraphConvolutionPerturb(nhid, nhid)
@@ -65,29 +65,29 @@ class GCNSyntheticPerturb(nn.Module):
     def reset_parameters(self, eps=10**-4):
         # Think more about how to initialize this
         with torch.no_grad():
-            if self.edge_additions:
-                adj_vec = create_vec_from_symm_matrix(self.adj, self.P_vec_size).numpy()
-                for i in range(len(adj_vec)):
-                    if i < 1:
-                        adj_vec[i] = adj_vec[i] - eps
-                    else:
-                        adj_vec[i] = adj_vec[i] + eps
-                torch.add(self.P_vec, torch.FloatTensor(adj_vec))       #self.P_vec is all 0s
-            else:
-                torch.sub(self.P_vec, eps)
+            # if self.edge_additions:
+            #     adj_vec = create_vec_from_symm_matrix(self.adj, self.P_vec_size).numpy()
+            #     for i in range(len(adj_vec)):
+            #         if i < 1:
+            #             adj_vec[i] = adj_vec[i] - eps
+            #         else:
+            #             adj_vec[i] = adj_vec[i] + eps
+            #     torch.add(self.P_vec, torch.FloatTensor(adj_vec))       #self.P_vec is all 0s
+            # else:
+            self.P_vec.data.fill_(1.0)  # Start from ones for edge deletions            # torch.sub(self.P_vec, eps)
 
     def forward(self, x, sub_adj):
         self.sub_adj = sub_adj
         # Same as normalize_adj in utils.py except includes P_hat in A_tilde
         self.P_hat_symm = create_symm_matrix_from_vec(self.P_vec, self.num_nodes)      # Ensure symmetry
 
-        A_tilde = torch.empty(self.num_nodes, self.num_nodes)
+        A_tilde = torch.zeros(self.num_nodes, self.num_nodes)
         A_tilde.requires_grad = True
 
-        if self.edge_additions:         # Learn new adj matrix directly
-            A_tilde = F.sigmoid(self.P_hat_symm) + torch.eye(self.num_nodes)  # Use sigmoid to bound P_hat in [0,1]
-        else:       # Learn P_hat that gets multiplied element-wise with adj -- only edge deletions
-            A_tilde = F.sigmoid(self.P_hat_symm) * self.sub_adj + torch.eye(self.num_nodes)       # Use sigmoid to bound P_hat in [0,1]
+        # if self.edge_additions:         # Learn new adj matrix directly
+        #     A_tilde = F.sigmoid(self.P_hat_symm) + torch.eye(self.num_nodes)  # Use sigmoid to bound P_hat in [0,1]
+        # else:       # Learn P_hat that gets multiplied element-wise with adj -- only edge deletions
+        A_tilde = F.sigmoid(self.P_hat_symm) * self.sub_adj + torch.eye(self.num_nodes)       # Use sigmoid to bound P_hat in [0,1]
 
         D_tilde = get_degree_matrix(A_tilde).detach()       # Don't need gradient of this
         # Raise to power -1/2, set all infs to 0s
@@ -112,10 +112,10 @@ class GCNSyntheticPerturb(nn.Module):
 
         self.P = (F.sigmoid(self.P_hat_symm) >= 0.5).float()      # threshold P_hat
 
-        if self.edge_additions:
-            A_tilde = self.P + torch.eye(self.num_nodes)
-        else:
-            A_tilde = self.P * self.adj + torch.eye(self.num_nodes)
+        # if self.edge_additions:
+        #     A_tilde = self.P + torch.eye(self.num_nodes)
+        # else:
+        A_tilde = self.P * self.adj + torch.eye(self.num_nodes)
 
         D_tilde = get_degree_matrix(A_tilde)
         # Raise to power -1/2, set all infs to 0s

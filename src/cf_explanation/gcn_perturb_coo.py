@@ -1,3 +1,7 @@
+'''
+Implementation for gcn_perturb for PyG models using COO format.
+'''
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,9 +41,13 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         """
         predict class with edges weighted between 0 and 1
         """
+        # Map P_vec grads to matching position in edge_index for symmetry.
         self.edge_weight_params = torch.empty(self.edge_index.shape[1])
         self.edge_weight_params[self.matched_edges[0]] = self.P_vec
         self.edge_weight_params[self.matched_edges[1]] = self.P_vec
+
+        # Mask calculated here so it is set if user does not call forward hard.
+        self.edge_mask = (self.edge_weight_params > 0)
 
         return self.model(self.x, self.edge_index,
                           edge_weight=torch.sigmoid(self.edge_weight_params))[self.index]
@@ -48,12 +56,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         """
         predict original model with edge deletion
         """
-
-        # Threshold edge weights at 0 (equivalent to doing sigmoid then 0.5)
-        self.edge_mask = (self.edge_weight_params > 0)
-        self.masked_edge_index = self.edge_index[:, self.edge_mask]
-
-        return self.model(self.x, self.masked_edge_index)[self.index]
+        return self.model(self.x, self.edge_index[:, self.edge_mask])[self.index]
 
     def loss(self, output, y_new):
         pred_same = (y_new == self.original_class).float()
@@ -70,7 +73,8 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
 
     def score_edges(self, num_samples=5, initial=1.0, eps=0.0):
         """
-        Measure average gradient change over multiple samples
+        Measure average gradient change over multiple samples.
+        Used for greedy and bf explainers.
         """
         importance_scores = torch.zeros(self.P_vec.shape)
 
@@ -88,5 +92,3 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             importance_scores -= self.P_vec.grad
 
         return list(zip(*self.matched_edges)), importance_scores
-
-

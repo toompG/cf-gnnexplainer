@@ -20,7 +20,6 @@ from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 floattype = torch.float32
 torch.set_default_dtype(floattype)
 
-
 def remove_bidirectional_edges(edge_index):
     edges = edge_index.numpy().T
 
@@ -39,18 +38,19 @@ def extract_grads_for_sparse_edges(dense_grad_vec, edge_index, num_nodes):
     return sparse_edge_grads
 
 
-def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, edge_index):
+def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense,
+                                      edge_index, epochs=100, correct_grads=False, verbose=True):
     """
     Compare gradients between dense and sparse implementations
     """
     # get list of unique edges, used for matching individual gradients
-    P_edge = remove_bidirectional_edges(edge_index)
-    y_pred_orig = torch.argmax(sparse_model.forward())
+    P_edge = edge_index[:, sparse_model.matched_edges[0]]
+    y_pred_orig = sparse_model.original_class
     idx = sparse_model.index
 
 
     # Run wrapped model in sparse explainer and original as implemented side by side
-    for i in range(100):
+    for i in range(epochs):
         out_dense = dense_model.forward(x, adj_dense)
         out_sparse = sparse_model.forward()
 
@@ -60,8 +60,8 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
         y_dense = torch.argmax(y_dense, dim=1)[idx]
         y_sparse = torch.argmax(y_sparse)
 
-        loss_dense, _, dist, _ = dense_model.loss(out_dense[idx], y_pred_orig, y_dense)
-        loss_sparse, _, dist2, _ = sparse_model.loss(out_sparse, y_sparse)
+        loss_dense, _, _, _ = dense_model.loss(out_dense[idx], y_pred_orig, y_dense)
+        loss_sparse, _, _, _ = sparse_model.loss(out_sparse, y_sparse)
 
         print(f"difference loss: {abs(loss_dense.item() - loss_sparse.item()):.2e}")
 
@@ -79,19 +79,23 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense, e
 
         dense_grads = extract_grads_for_sparse_edges(dense_model.P_vec.grad, P_edge, dense_model.num_nodes)
         sparse_grads = sparse_model.P_vec.grad
-        for E, i, j in zip(sparse_model.edge_index.T, dense_grads, sparse_grads):
-            if i-j != 0:
-                print(E, i, j, i-j)
 
-        print(f"difference grad: {sum(abs(dense_grads - sparse_grads))}")
+        if verbose:
+            for E, i, j in zip(P_edge.T, dense_grads, sparse_grads):
+                if i-j != 0:
+                    print(E, i, j, i-j)
 
+        print(f"mean difference grad: {sum(abs(dense_grads - sparse_grads)) / dense_grads.shape[0]}")
+        print(f"max difference grad:  {(dense_grads - sparse_grads).max()}")
+
+        # print(*sparse_model.named_parameters())
         # update params for next epoch
         with torch.no_grad():
             lr = 0.1
             if dense_model.P_vec.grad is not None:
                 dense_model.P_vec -= lr * dense_model.P_vec.grad
             if sparse_model.P_vec.grad is not None:
-                sparse_model.P_vec -= lr * sparse_model.P_vec.grad
+                sparse_model.P_vec -= lr * (dense_grads if correct_grads else sparse_model.P_vec.grad)
 
 
 def main():

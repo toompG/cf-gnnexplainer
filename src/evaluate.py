@@ -13,7 +13,8 @@ from cmp_original import WrappedOriginalGCN
 
 
 def calculate_accuracy_new(df, data, motif_edges_set):
-        # Filter out nodes with label 0
+    ''' New accuracy calculation. Uses ground truths and only evaluates
+     true positives found by classifier model. '''
     df_motif = df[df["label"] != 0].reset_index(drop=True)
     df_motif = df_motif[df_motif["prediction"] != 0].reset_index(drop=True)
 
@@ -23,21 +24,12 @@ def calculate_accuracy_new(df, data, motif_edges_set):
         overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set or \
                                                          (j.item(), i.item()) in motif_edges_set))
         accuracy.append(overlap_count / cf_edges.shape[1])
-
-        # if cf_edges.shape[1] < 30:
-        #     print(df_motif.iloc[i, 0], cf_edges[:,0], accuracy[-1])
-
-        # if accuracy[-1] < 1:
-        #     print(df_motif.iloc[i][0])
-        #     print(cf_edges)
-        #     print(accuracy[-1])
-
     df_motif['accuracy'] = accuracy
     return df_motif
 
 
 def calculate_accuracy_original(df, data, motif_nodes):
-    # Filter out nodes with label 0
+    ''' Exact recreation of original accuracy function. '''
     df_motif = df[df["prediction"] != 0].reset_index(drop=True)
 
     accuracy = []
@@ -48,12 +40,6 @@ def calculate_accuracy_original(df, data, motif_nodes):
 
         overlap_count = sum(1 for i in nodes_involved if i in motif_nodes)
         accuracy.append(overlap_count / len(nodes_involved))
-
-        # if accuracy[-1] < 1:
-        #     print(cf_edges)
-        #     print(df_motif.iloc[i])
-        # if cf_edges.shape[1] < 30:
-        #     print(df_motif.iloc[i, 0], nodes_involved, accuracy[-1])
 
     df_motif['accuracy'] = accuracy
     return df_motif
@@ -70,7 +56,7 @@ def main():
 
     if '.pkl' not in args.dst:
         args.dst = args.dst + '.pkl'
-    # Load original graph
+
     script_dir = Path(__file__).parent
     graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
 
@@ -81,7 +67,7 @@ def main():
     with open(f'../results/{args.dst}', "rb") as f:
         df = pd.read_pickle(f)
 
-    # Find subgraph size for fidelity
+    # Find subgraph size for sparsity calculation
     df['subgraph_size'] = [(k_hop_subgraph(i, 4, data.edge_index)[1]).shape[1] for i in df['node']]
 
     # Find edges between motif nodes
@@ -91,53 +77,45 @@ def main():
     motif_edges_set = set((i.item(), j.item()) for i, j in motif_edges.T)
 
     df_motif_new = calculate_accuracy_new(df, data, motif_edges_set)
-    # df_motif = df_motif.dropna()
     cfs = df.dropna().reset_index()
 
-    # submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
-    #                         nclass=len(data.y.unique()), dropout=0)
+    submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                            nclass=len(data.y.unique()), dropout=0)
 
-    # submodel.load_state_dict(torch.load(model_path))
-    # submodel.eval()
+    submodel.load_state_dict(torch.load(model_path))
+    submodel.eval()
 
-    # model = WrappedOriginalGCN(submodel).eval()
+    model = WrappedOriginalGCN(submodel).eval()
 
-    # predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
-    # motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
-    # df_motif = calculate_accuracy_original(df, data, motif_nodes)
+    predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
+    motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
+    df_motif = calculate_accuracy_original(df, data, motif_nodes)
 
-    # if args.compare:
-    #     for i in range(len(cfs)):
-    #         cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
+    if args.compare:
+        # Verify that counterfactuals actually produce the new labels as
+        # written in dataframe.
+        for i in range(len(cfs)):
+            cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
 
-    #         print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
-    #         print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
+            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
 
-    #         assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
-
+            assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
     print(f'{args.exp} tested at {args.dst}')
     print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}')
     print(f'Fidelity: {1 - len(cfs) / len(data.test_set):.3f}')
     print(f'Distance: {cfs["distance"].mean():.3f}, std: {cfs["distance"].std():.3f}')
-    print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
-    # print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
-    # print('')
-    # df_motif = df_motif.dropna()
+    print(f'Sparsity: {np.mean(1 - cfs["distance"] / cfs["subgraph_size"] * 2):.3f}, std: {np.std(1 - cfs["distance"] / cfs["subgraph_size"]):.3f}')
+
+    df_motif = df_motif.dropna()
     df_motif_new = df_motif_new.dropna()
 
-    # print(f'Distance: {df_motif["distance"].mean():.3f}, std: {df_motif["distance"].std():.3f}')
-    # print(f'Sparsity: {np.mean(1 - df_motif["distance"] / df_motif["subgraph_size"] * 2):.3f}, std: {np.std(1 - df_motif["distance"] / df_motif["subgraph_size"]):.3f}')
-    # print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
+    print(f'Accuracy: {np.mean(df_motif["accuracy"]):.3f}, std: {np.std(df_motif["accuracy"]):.3f}')
     print(f'Accuracy (new): {np.mean(df_motif_new["accuracy"]):.3f}, std: {np.std(df_motif_new["accuracy"]):.3f}')
 
     print('')
 
-    # print(df_motif_new)
-
 
 if __name__ == '__main__':
     main()
-
-
-# TODO: motif_edge_set to function, use in inspect, compare accuracy better <3
