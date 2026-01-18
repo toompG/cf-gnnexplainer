@@ -1,120 +1,110 @@
-from __future__ import division
-from __future__ import print_function
-import sys
-sys.path.append('..')
+from pathlib import Path
 import argparse
-import pickle
-import numpy as np
-import time
+
 import torch
+
 from gcn import GCNSynthetic
-from cf_explanation.cf_explainer import CFExplainer
-from utils.utils import normalize_adj, get_neighbourhood, safe_open
-from torch_geometric.utils import dense_to_sparse
+from gcn_sparse import GCN
+from wrapper import WrappedOriginalGCN, GCNConvGCNSynthetic
+from cf_explanation.cf_explainer import CFExplainerNew, CFExplainer, \
+                                        GreedyCFExplainer, BFCFExplainer
+from utils.test_functions import load_dataset, explain_new, explain_original, \
+                                 load_sparse_dense_weights
 
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='syn1')
-
-# Based on original GCN models -- do not change
-parser.add_argument('--hidden', type=int, default=20, help='Number of hidden units.')
-parser.add_argument('--n_layers', type=int, default=3, help='Number of convolutional layers.')
-parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate (between 0 and 1)')
-
-# For explainer
-parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--lr', type=float, default=0.005, help='Learning rate for explainer')
-parser.add_argument('--optimizer', type=str, default="SGD", help='SGD or Adadelta')
-parser.add_argument('--n_momentum', type=float, default=0.0, help='Nesterov momentum')
-parser.add_argument('--beta', type=float, default=0.5, help='Tradeoff for dist loss')
-parser.add_argument('--num_epochs', type=int, default=500, help='Num epochs for explainer')
-parser.add_argument('--device', default='cpu', help='CPU or GPU.')
-args = parser.parse_args()
-
-print(args)
-
-args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-torch.autograd.set_detect_anomaly(True)
+cf_explainers = {
+    'original': CFExplainer,
+    'cf_wrapped': CFExplainerNew,
+    'cf_transposed': CFExplainerNew,
+    'greedy': GreedyCFExplainer,
+    'bf': BFCFExplainer
+}
 
 
-# Import dataset from GNN explainer paper
-with open("../data/gnn_explainer/{}.pickle".format(args.dataset[:4]), "rb") as f:
-	data = pickle.load(f)
+def explain_original_experiment(args, data):
+    script_dir = Path(__file__).parent
 
-adj = torch.Tensor(data["adj"]).squeeze()       # Does not include self loops
-features = torch.Tensor(data["feat"]).squeeze()
-labels = torch.tensor(data["labels"]).squeeze()
-idx_train = torch.tensor(data["train_idx"])
-idx_test = torch.tensor(data["test_idx"])
-edge_index = dense_to_sparse(adj)       # Needed for pytorch-geo functions
+    cf_model = cf_explainers.get(args.cf_method, None)
+    if cf_model is None:
+        raise AssertionError('cf_method must be original, cf_wrapped, \
+                             cf_transposed, greedy, bf')
 
-# Change to binary task: 0 if not in house, 1 if in house
-if args.dataset == "syn1_binary":
-	labels[labels==2] = 1
-	labels[labels==3] = 1
+    model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
+    if args.cf_method == 'original':
+        model = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                                nclass=len(data.y.unique()), dropout=0.0)
+        model.load_state_dict(torch.load(model_path))
+        model.eval()
 
-norm_adj = normalize_adj(adj)       # According to reparam trick from GCN paper
+        result = explain_original(model, data, lr=args.lr,
+                                  n_momentum=args.momentum,
+                                  epochs=args.epochs)
+        result.to_pickle(f"../results/{args.dst}.pkl")
+        return
+    if args.cf_method == 'cf_transposed':
+        model = GCN(data.x.shape[1], data.num_classes)
+        load_sparse_dense_weights(model, model_path)
+    else:
+        submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                                nclass=len(data.y.unique()), dropout=0.0)
+        submodel.load_state_dict(torch.load(model_path))
+        submodel.eval()
+        model = WrappedOriginalGCN(submodel)
 
-
-# Set up original model, get predictions
-model = GCNSynthetic(nfeat=features.shape[1], nhid=args.hidden, nout=args.hidden,
-					 nclass=len(labels.unique()), dropout=args.dropout)
-
-model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format(args.dataset)))
-model.eval()
-output = model(features, norm_adj)
-y_pred_orig = torch.argmax(output, dim=1)
-print("y_true counts: {}".format(np.unique(labels.numpy(), return_counts=True)))
-print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
-
-
-# Get CF examples in test set
-test_cf_examples = []
-start = time.time()
-for i in idx_test[:]:
-	sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i), edge_index, args.n_layers + 1, features, labels)
-	new_idx = node_dict[int(i)]
-
-	# Check that original model gives same prediction on full graph and subgraph
-	with torch.no_grad():
-		print("Output original model, full adj: {}".format(output[i]))
-		print("Output original model, sub adj: {}".format(model(sub_feat, normalize_adj(sub_adj))[new_idx]))
+    model.eval()
+    result = explain_new(
+        model, data.x, data.edge_index, data.y, data.test_set,
+        cf_explainers[args.cf_method], epochs=args.epochs, lr=args.lr,
+        n_momentum=args.momentum, eps=args.eps
+    )
+    result.to_pickle(f"../results/{args.dst}.pkl")
 
 
-	# Need to instantitate new cf model every time because size of P changes based on size of sub_adj
-	explainer = CFExplainer(model=model,
-							sub_adj=sub_adj,
-							sub_feat=sub_feat,
-							n_hid=args.hidden,
-							dropout=args.dropout,
-							sub_labels=sub_labels,
-							y_pred_orig=y_pred_orig[i],
-							num_classes = len(labels.unique()),
-							beta=args.beta,
-							device=args.device)
+def explain_sparse(args, data):
+    script_dir = Path(__file__).parent
+    model_path = script_dir / f'../models/sparse_gcn_3layer_{args.exp}.pt'
 
-	if args.device == 'cuda':
-		model.cuda()
-		explainer.cf_model.cuda()
-		adj = adj.cuda()
-		norm_adj = norm_adj.cuda()
-		features = features.cuda()
-		labels = labels.cuda()
-		idx_train = idx_train.cuda()
-		idx_test = idx_test.cuda()
+    cf_model = cf_explainers.get(args.cf_method, CFExplainerNew)
+    if cf_model == CFExplainer:
+        raise NotImplementedError(
+            'Sparse classifier cannot be explained in original framework. \
+             Leave cf_method unassigned to default to CFExplainerNew'
+        )
 
-	cf_example = explainer.explain(node_idx=i, cf_optimizer=args.optimizer, new_idx=new_idx, lr=args.lr,
-	                               n_momentum=args.n_momentum, num_epochs=args.num_epochs)
-	test_cf_examples.append(cf_example)
-	print("Time for {} epochs of one example: {:.4f}min".format(args.num_epochs, (time.time() - start)/60))
-print("Total time elapsed: {:.4f}s".format((time.time() - start)/60))
-print("Number of CF examples found: {}/{}".format(len(test_cf_examples), len(idx_test)))
+    model = GCN(data.x.shape[1], data.num_classes)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
 
-# Save CF examples in test set
+    result = explain_new(
+        model, data.x, data.edge_index, data.y, data.test_set,
+        cf_explainers[args.cf_method], epochs=args.epochs, lr=args.lr,
+        n_momentum=args.momentum, eps=args.eps
+    )
+    result.to_pickle(f"../results/{args.dst}.pkl")
 
-with safe_open("../results/{}/{}/{}_cf_examples_lr{}_beta{}_mom{}_epochs{}_seed{}".format(args.dataset, args.optimizer, args.dataset,
-																	args.lr, args.beta, args.n_momentum, args.num_epochs, args.seed), "wb") as f:
-	pickle.dump(test_cf_examples, f)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--exp', type=str, default='syn1')
+    parser.add_argument('--dst', type=str, default='results')
+    parser.add_argument('--cf_method', type=str, default='cf_wrapped')
+    parser.add_argument('--sparse', type=bool, default=False)
+    parser.add_argument('--lr', type=float, default=.1)
+    parser.add_argument('--momentum', type=float, default=0.0)
+    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--eps', type=float, default=0.0)
+    parser.add_argument('--seed', type=int, default=20)
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).parent
+    graph_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+    data = load_dataset(graph_path, 'cpu')
+
+    if args.sparse:
+        explain_sparse(args, data)
+    else:
+        explain_original_experiment(args, data)
+
+
+if __name__ == '__main__':
+    main()

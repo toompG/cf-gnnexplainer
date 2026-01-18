@@ -7,10 +7,8 @@ from pathlib import Path
 import torch
 from torch_geometric.utils import k_hop_subgraph, to_dense_adj
 import pandas as pd
-import numpy as np
 
 import psutil
-from memory_profiler import memory_usage
 from collections import defaultdict
 from tqdm import tqdm
 from functools import partial
@@ -30,7 +28,7 @@ def get_process_memory():
     return process.memory_info().rss / 1024 / 1024
 
 
-def benchmark_node(benchmark_fun, num_trials=5):
+def measure_function_time(benchmark_fun, num_trials=5):
     """Benchmark with full memory tracking including C/C++"""
     results = defaultdict(list)
 
@@ -112,8 +110,7 @@ def benchmark_dataset(data, model, benchmark_fun, dense=False):
     results = []
 
     test = [*range(data.x.shape[0])]
-    print(len(test))
-    for i in tqdm(data.test):
+    for i in tqdm(test):
         sub_nodes, sub_edge_index, mapping, _ = k_hop_subgraph(
             int(i),
             4,
@@ -125,7 +122,7 @@ def benchmark_dataset(data, model, benchmark_fun, dense=False):
         adj = to_dense_adj(sub_edge_index).squeeze() if dense else sub_edge_index
 
         sub_index = mapping if mapping.dim() > 0 else mapping.unsqueeze(0)
-        node_results = benchmark_node(
+        node_results = measure_function_time(
             partial(benchmark_fun, model=model, node_idx=int(sub_index),
                     x=sub_x, adj=adj, n_classes=data.num_classes),
             num_trials=1
@@ -171,17 +168,19 @@ def main():
         assert (y_pred == data.y).float().mean() > 0.8
         models.append(dense)
 
-    experiments = [['BAShapes',    'Sparse', datasets[0], models[0]],
-                   ['BAShapes',    'Dense',  datasets[0], models[1]],
-                   ['BACommunity', 'Sparse', datasets[1], models[2]],
-                   ['BACommunity', 'Dense',  datasets[1], models[3]],
-                   ['TreeGrid',    'Sparse', datasets[2], models[4]],
-                   ['TreeGrid',    'Dense',  datasets[2], models[5]],
-                   ['TreeCycle',   'Sparse', datasets[3], models[6]],
-                   ['TreeCycle',   'Dense',  datasets[3], models[7]]]
+    experiments = [
+        ['BAShapes',    'Sparse', datasets[0], models[0]],
+        ['BAShapes',    'Dense',  datasets[0], models[1]],
+        # ['BACommunity', 'Sparse', datasets[1], models[2]],
+        # ['BACommunity', 'Dense',  datasets[1], models[3]],
+        # ['TreeGrid',    'Sparse', datasets[2], models[4]],
+        # ['TreeGrid',    'Dense',  datasets[2], models[5]],
+        # ['TreeCycle',   'Sparse', datasets[3], models[6]],
+        # ['TreeCycle',   'Dense',  datasets[3], models[7]]
+    ]
 
     results = []
-    for dataset_name, model_type, dataset, model in experiments[:4]:
+    for dataset_name, model_type, dataset, model in experiments:
         benchmark_fun = train_explainer_coo if model_type == 'Sparse' else train_explainer_dense
 
         result = benchmark_dataset(dataset, model, benchmark_fun,
@@ -189,11 +188,8 @@ def main():
         result.insert(0, 'dataset', ' '.join([dataset_name, model_type]))
         results.append(result)
 
-
-
-        pd.concat(results, ignore_index=True).to_pickle(f'../../results/perf_{dataset_name}_{model_type}.pkl')
-
-    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance.pkl")
+        pd.concat(results, ignore_index=True).to_pickle(f'../../results/perf_spmm_{dataset_name}_{model_type}.pkl')
+    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance_spmm.pkl")
 
 
 if __name__ == '__main__':

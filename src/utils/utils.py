@@ -52,8 +52,6 @@ def normalize_adj(adj):
     return norm_adj
 
 def get_neighbourhood(node_idx, edge_index, n_hops, features, labels):
-    # CHANGE k hop neighbourhood seemed to fail for edge_index[0] so I changed it
-
     edge_subset = k_hop_subgraph(node_idx, n_hops, edge_index)     # Get all nodes involved
     edge_subset_relabel = subgraph(edge_subset[0], edge_index, relabel_nodes=True)       # Get relabelled subset of edges
     sub_adj = to_dense_adj(edge_subset_relabel[0]).squeeze()
@@ -104,7 +102,7 @@ def find_edge_pairs(edge_index):
     unique_edges = np.unique(sorted_edges, axis=0)
 
     # Use e_max to guarantee unique hashes
-    e_max = edges.max()
+    e_max = edges.max() + 1
     edge_map = {(e_max*i + j): n for n, (i, j) in enumerate(edges)}
 
     indices_a = torch.zeros(unique_edges.shape[0], dtype=torch.long, device=edge_index.device)

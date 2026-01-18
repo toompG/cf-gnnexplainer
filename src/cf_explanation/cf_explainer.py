@@ -31,14 +31,13 @@ class CFExplainerNew:
     New version of CF Explainer to help in training perturb object for model
     that use COO format.
     '''
-    def __init__(self, model, device='cpu', epochs=500, lr=0.1, n_momentum=0.0, eps=0.0):
+    def __init__(self, model, device='cpu', epochs=500, lr=0.1, n_momentum=0.0, **kwargs):
         self.model = model
         self.epochs = epochs
         self.lr = lr
         self.n_momentum = n_momentum
-        self.eps = eps
-
         self.device = device
+        self.kwargs = kwargs
 
     def __call__(self, index, x, edge_index):
         ''' Find an edge mask that predicts a different label. '''
@@ -63,7 +62,7 @@ class CFExplainerNew:
             optimizer.step()
 
         # No cf found
-        return np.zeros(edge_index.shape[1], dtype=bool)
+        return torch.zeros(edge_index.shape[1], dtype=bool)
 
 
 class BFCFExplainer(CFExplainerNew):
@@ -84,11 +83,11 @@ class BFCFExplainer(CFExplainerNew):
         prediction = cf_model.original_class
 
         edges, scores = cf_model.score_edges(num_samples=10,
-                                             eps=self.eps)
+                                             eps=self.kwargs['eps'])
 
         # Modify scores to remove positive grads after negatives but before 0.0
         # This was found to increase fidelity
-        scores[torch.where(scores > 0.0)] *= -.001
+        scores[torch.where(scores > 0.0)] *= -10e-4
         ranking = sorted(list(enumerate(edges)), key=lambda x: scores[x[0]])
 
         best_distance = np.inf
@@ -142,11 +141,11 @@ class GreedyCFExplainer(CFExplainerNew):
 
         # Create ranking of most important edges
         edges, scores = cf_model.score_edges(num_samples=10,
-                                                 eps=self.eps)
+                                             eps=self.kwargs['eps'])
 
         # Modify scores to remove positive grads after negatives but before 0.0
         # This was found to increase fidelity
-        scores[torch.where(scores > 0.0)] *= -.001
+        scores[torch.where(scores > 0.0)] *= -10e-4
         ranking = sorted(list(enumerate(edges)), key=lambda x: scores[x[0]])
 
         mask = torch.ones(edge_index.shape[1], dtype=bool)
@@ -162,128 +161,6 @@ class GreedyCFExplainer(CFExplainerNew):
             if new_prediction != prediction:
                 return mask.clone()
         return torch.zeros(edge_index.shape[1], dtype=bool)
-
-
-# # inherit from explainer algorithm pytorch geometric
-# # implement baseclass functions
-# class CFExplainer:
-#     '''
-#     CF Explainer class based on the original version in Ana's paper.
-
-#     Changes:
-#      - Output list changed to match current format in evaluate.py
-#      - Print statements removed
-#      - Return early when CF is found
-#     '''
-
-#     def __init__(self, model, data, index, n_hid, num_classes, dropout, beta, device):
-#         self.model = model # trained gcnconv model
-#         self.model.eval()
-
-#         sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(index),
-#                                                 data.edge_index,
-#                                                 4,
-#                                                 data.x,
-#                                                 data.y)
-#         self.new_idx = node_dict[int(index)]
-#         self.node_idx = int(index)
-#         self.node_dict = node_dict
-#         self.y_pred_orig = torch.argmax(model(data.x, data.norm_adj), dim=1)[int(index)]
-
-#         self.edge_index = data.edge_index
-#         self.sub_adj = sub_adj
-#         self.sub_feat = sub_feat
-#         self.n_hid = n_hid
-#         self.dropout = dropout
-#         self.sub_labels = sub_labels
-#         self.beta = beta
-#         self.num_classes = num_classes
-#         self.device = device
-
-#         # Instantiate CF model class, load weights from original model
-#         self.cf_model = GCNSyntheticPerturb(self.sub_feat.shape[1], n_hid,
-#                                             n_hid, self.num_classes,
-#                                             self.sub_adj, dropout, beta)
-
-#         self.cf_model.load_state_dict(self.model.state_dict(), strict=False)
-
-#         # Freeze weights from original model in cf_model
-#         for name, param in self.cf_model.named_parameters():
-#             if name.endswith("weight") or name.endswith("bias"):
-#                 param.requires_grad = False
-
-#     ''' This is forward in ExplainerAlgorithm class for PyG '''
-#     def explain(self, cf_optimizer, lr, n_momentum,
-#                 num_epochs):
-#         self.x = self.sub_feat
-#         self.A_x = self.sub_adj
-#         self.D_x = get_degree_matrix(self.A_x) # Never used?
-
-#         if cf_optimizer == "SGD" and n_momentum == 0.0:
-#             self.cf_optimizer = optim.SGD(self.cf_model.parameters(), lr=lr)
-#         elif cf_optimizer == "SGD" and n_momentum != 0.0:
-#             self.cf_optimizer = optim.SGD(self.cf_model.parameters(),
-#                                           lr=lr,
-#                                           nesterov=True,
-#                                           momentum=n_momentum)
-#         elif cf_optimizer == "Adadelta":
-#             self.cf_optimizer = optim.Adadelta(self.cf_model.parameters(),
-#                                                lr=lr)
-
-#         best_cf_example = []
-#         best_loss = np.inf
-#         num_cf_examples = 0
-#         for epoch in range(num_epochs):
-#             new_example, loss_total = self.train(epoch)
-#             if new_example != [] and loss_total < best_loss:
-#                 best_cf_example.append(new_example)
-#                 best_loss = loss_total
-#                 num_cf_examples += 1
-
-#                 new_example[-1] = convert_subadj_to_full_mask(self.node_dict,
-#                                                               new_example[-1],
-#                                                               self.edge_index)
-#                 break
-#         print("{} CF examples for node_idx = {}".format(
-#             num_cf_examples, self.node_idx))
-#         print(" ")
-#         if best_cf_example == []:
-#             return [self.y_pred_orig.item(), np.nan, torch.zeros(self.edge_index.shape[1], dtype=bool)]
-#         return best_cf_example[0]
-
-#     def train(self, epoch):
-#         t = time.time()
-#         self.cf_model.train()
-#         self.cf_optimizer.zero_grad()
-
-#         # output uses differentiable P_hat ==> adjacency matrix not binary, but needed for training
-#         # output_actual uses thresholded P ==> binary adjacency matrix ==> gives actual prediction
-#         output = self.cf_model.forward(self.x, self.A_x)
-#         output_actual, self.P = self.cf_model.forward_prediction(self.x)
-
-#         # Need to use new_idx from now on since sub_adj is reindexed
-#         y_pred_new = torch.argmax(output[self.new_idx])
-#         y_pred_new_actual = torch.argmax(output_actual[self.new_idx])
-
-#         # print(output[self.new_idx])
-#         # print(self.cf_model.P_vec)
-
-#         # loss_pred indicator should be based on y_pred_new_actual NOT y_pred_new!
-#         loss_total, loss_pred, loss_graph_dist, cf_adj = self.cf_model.loss(
-#             output[self.new_idx], self.y_pred_orig, y_pred_new_actual)
-#         loss_total.backward()
-#         clip_grad_norm_(self.cf_model.parameters(), 2.0)
-#         self.cf_optimizer.step()
-
-#         cf_stats = []
-#         if y_pred_new_actual != self.y_pred_orig:
-#             cf_stats = [
-#                 y_pred_new_actual.item(),
-#                 loss_graph_dist.item(),
-#                 self.cf_model.P * self.sub_adj
-#             ]
-
-#         return (cf_stats, loss_total.item())
 
 
 class CFExplainer:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from torch_geometric.utils import k_hop_subgraph, mask_select
 from gcn import GCNSynthetic
+from gcn_sparse import GCN
 from cmp_original import WrappedOriginalGCN
 
 
@@ -21,8 +22,10 @@ def calculate_accuracy_new(df, data, motif_edges_set):
     accuracy = []
     for i in range(len(df_motif)):
         cf_edges = data.edge_index[:, ~df_motif['cf_mask'][i]]
-        overlap_count = sum((1 for i, j in cf_edges.T if (i.item(), j.item()) in motif_edges_set or \
-                                                         (j.item(), i.item()) in motif_edges_set))
+        overlap_count = sum((1 for i, j in cf_edges.T
+                             if (i.item(), j.item()) in motif_edges_set or \
+                                (j.item(), i.item()) in motif_edges_set))
+
         accuracy.append(overlap_count / cf_edges.shape[1])
     df_motif['accuracy'] = accuracy
     return df_motif
@@ -44,25 +47,38 @@ def calculate_accuracy_original(df, data, motif_nodes):
     df_motif['accuracy'] = accuracy
     return df_motif
 
+
 def main():
     device = 'cpu'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dst', type=str, default='results.pkl')
     parser.add_argument('--exp', type=str, default='syn1')
-    parser.add_argument('--compare', default=False, help='Use original model location to verify correctness')
+    parser.add_argument('--sparse', type=bool, default=False)
 
     args = parser.parse_args()
 
+    script_dir = Path(__file__).parent
+    graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+    graph_data_path = graph_data_path.resolve()
+
+    data = load_dataset(graph_data_path, device)
     if '.pkl' not in args.dst:
         args.dst = args.dst + '.pkl'
 
-    script_dir = Path(__file__).parent
-    graph_data_path = script_dir / f'../data/gnn_explainer/{args.exp}.pickle'
+    if args.sparse:
+        model_path = script_dir / f'../models/sparse_gcn_3layer_{args.exp}.pt'
+        classifier = GCN(data.x.shape[1], data.num_classes)
+        classifier.load_state_dict(torch.load(model_path))
+        classifier.eval()
+    else:
+        model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
+        submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                        nclass=len(data.y.unique()), dropout=0)
 
-    model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
-    graph_data_path = graph_data_path.resolve()
-    data = load_dataset(graph_data_path, device)
+        submodel.load_state_dict(torch.load(model_path))
+        submodel.eval()
+        classifier = WrappedOriginalGCN(submodel).eval()
 
     with open(f'../results/{args.dst}', "rb") as f:
         df = pd.read_pickle(f)
@@ -79,28 +95,13 @@ def main():
     df_motif_new = calculate_accuracy_new(df, data, motif_edges_set)
     cfs = df.dropna().reset_index()
 
-    submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
-                            nclass=len(data.y.unique()), dropout=0)
-
-    submodel.load_state_dict(torch.load(model_path))
-    submodel.eval()
-
-    model = WrappedOriginalGCN(submodel).eval()
-
-    predictions = torch.argmax(model(data.x, data.edge_index), dim=1)
+    predictions = torch.argmax(classifier(data.x, data.edge_index), dim=1)
     motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
     df_motif = calculate_accuracy_original(df, data, motif_nodes)
 
-    if args.compare:
-        # Verify that counterfactuals actually produce the new labels as
-        # written in dataframe.
-        for i in range(len(cfs)):
-            cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
-
-            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
-            print(torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]))
-
-            assert torch.argmax(model(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
+    for i in range(len(cfs)):
+        cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
+        assert torch.argmax(classifier(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 
     print(f'{args.exp} tested at {args.dst}')
     print(f'Cf examples found: {len(cfs)}/{len(data.test_set)}')

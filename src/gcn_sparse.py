@@ -32,6 +32,7 @@ class GCN(torch.nn.Module):
         self.lin = nn.Linear(2 * n_hid + n_out, num_classes)
         self.dropout = dropout
 
+        # Bias is added manually to match GCNSynthetic implementation
         self.bias1 = nn.Parameter(torch.zeros(n_hid))
         self.bias2 = nn.Parameter(torch.zeros(n_hid))
         self.bias3 = nn.Parameter(torch.zeros(n_out))
@@ -57,7 +58,6 @@ class SmolGCN(torch.nn.Module):
         x1 = self.conv1(x, edge_index, edge_weight=edge_weight).relu()
         x1 = F.dropout(x1, p=self.dropout, training=self.training)
         x2 = self.conv2(x1, edge_index, edge_weight=edge_weight)
-
         return F.log_softmax(x2, dim=1)
 
 
@@ -161,10 +161,10 @@ def main():
     predictions = output.argmax(dim=1)
     train_accuracy = (predictions == data.y).float().mean()
     print("y_true counts: {}".format(np.unique(data.y.numpy(), return_counts=True)))
-    print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
+    print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))
     print(f"Training accuracy: {train_accuracy:.4f}")
 
-    explain_new(model, data.x, data.edge_index, data.test_set, data.y)
+    explain_new(model, data.x, data.edge_index, data.y, data.test_set)
 
 
 if __name__ == '__main__':

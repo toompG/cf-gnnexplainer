@@ -10,12 +10,10 @@ import numpy as np
 from torch_geometric.data import Data
 from torch_geometric.utils import dense_to_sparse
 
-from .utils import normalize_adj, k_hop_subgraph, get_neighbourhood
+from .utils import normalize_adj, k_hop_subgraph
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cf_explanation.cf_explainer import CFExplainer, CFExplainerNew
-# from gcn import GCNSynthetic
-# from gcn_sparse import GCN
 
 
 columns = ['node', 'label', 'prediction', 'cf_prediction',
@@ -111,7 +109,6 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
             cf_example[-1] = full_edge_mask
         else:
             cf_example[-1] = torch.zeros(data.edge_index.shape[1], dtype=bool)
-
         test_cf_examples.append([i.item(), data.y[i].item(), predictions[i].item()] + cf_example)
 
     return pd.DataFrame(test_cf_examples, columns=columns)
@@ -119,9 +116,17 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
 
 def explain_new(model, x, edge_index, y, target, cf_model=CFExplainerNew, n_hops=4,
                device='cpu', epochs=500, lr=0.1, n_momentum=0.0, eps=0.0):
+    '''
+    Explain nodes in target using a cf_model
 
+    Calculates node subgraph
+    Converts explanation in subgraph to explanation in full graph
+    Adds other required data for analysis of performance
+
+    Returns dataframe that might be used in analysis using evaluate.py
+    '''
     predictions = torch.argmax(model(x, edge_index), dim=1)
-    explainer = cf_model(model, device, epochs, lr, n_momentum, eps)
+    explainer = cf_model(model, device, epochs, lr, n_momentum, eps=eps)
 
     counterfactuals = []
     for i in tqdm(target):
