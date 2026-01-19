@@ -71,7 +71,7 @@ def load_sparse_dense_weights(model, path):
 
 
 def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
-                     device='cpu', target=None):
+                     device='cpu', target=None, skip=True):
     predictions = torch.argmax(model(data.x, data.norm_adj), dim=1)
 
     nodes = data.test_set if target == None else target
@@ -92,7 +92,7 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
 
         explainer = CFExplainer(model, sub_adj, sub_x, 20, 0.0, None,
                                 predictions[i], data.num_classes,
-                                beta=.5, device=device)
+                                beta=.5, device=device, return_early=skip)
 
         cf_example = explainer.explain('SGD', i, sub_index, lr=lr,
                                        n_momentum=n_momentum, num_epochs=epochs)

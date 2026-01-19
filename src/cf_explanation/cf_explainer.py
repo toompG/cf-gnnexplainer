@@ -173,7 +173,7 @@ class CFExplainer:
      - removed print statements
     """
     def __init__(self, model, sub_adj, sub_feat, n_hid, dropout,
-                  sub_labels, y_pred_orig, num_classes, beta, device):
+                  sub_labels, y_pred_orig, num_classes, beta, device, return_early=True):
         super(CFExplainer, self).__init__()
         self.model = model
         self.model.eval()
@@ -186,6 +186,7 @@ class CFExplainer:
         self.beta = beta
         self.num_classes = num_classes
         self.device = device
+        self.return_early = return_early
 
         self.edge_index = dense_to_sparse(sub_adj)[0]
 
@@ -224,7 +225,8 @@ class CFExplainer:
                 best_cf_example.append(new_example)
                 best_loss = loss_total
                 num_cf_examples += 1
-                return new_example
+                if self.return_early:
+                    return new_example
 
         return [self.y_pred_orig.item(), np.nan,
                 torch.zeros(self.edge_index.shape[1], dtype=bool)]

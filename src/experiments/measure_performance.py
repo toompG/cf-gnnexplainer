@@ -39,7 +39,7 @@ def measure_function_time(benchmark_fun, num_trials=5):
 
 
         train_start = time.perf_counter()
-        explainer, losses = benchmark_fun()
+        benchmark_fun()
 
         total_train_time = time.perf_counter() - train_start
 
@@ -48,8 +48,7 @@ def measure_function_time(benchmark_fun, num_trials=5):
         # Store results
         results['trial'].append(trial)
         # results['num_edges'].append(k_hop_edges)
-        results['total_train_time'].append(total_train_time)
-        results['final_loss'].append(losses[-1])
+        results['total_time'].append(total_train_time)
 
         results['mem_before_mb'].append(mem_before)
         results['mem_after_mb'].append(mem_after)
@@ -171,12 +170,12 @@ def main():
     experiments = [
         ['BAShapes',    'Sparse', datasets[0], models[0]],
         ['BAShapes',    'Dense',  datasets[0], models[1]],
-        # ['BACommunity', 'Sparse', datasets[1], models[2]],
-        # ['BACommunity', 'Dense',  datasets[1], models[3]],
-        # ['TreeGrid',    'Sparse', datasets[2], models[4]],
-        # ['TreeGrid',    'Dense',  datasets[2], models[5]],
-        # ['TreeCycle',   'Sparse', datasets[3], models[6]],
-        # ['TreeCycle',   'Dense',  datasets[3], models[7]]
+        ['BACommunity', 'Sparse', datasets[1], models[2]],
+        ['BACommunity', 'Dense',  datasets[1], models[3]],
+        ['TreeGrid',    'Sparse', datasets[2], models[4]],
+        ['TreeGrid',    'Dense',  datasets[2], models[5]],
+        ['TreeCycle',   'Sparse', datasets[3], models[6]],
+        ['TreeCycle',   'Dense',  datasets[3], models[7]]
     ]
 
     results = []
@@ -188,8 +187,8 @@ def main():
         result.insert(0, 'dataset', ' '.join([dataset_name, model_type]))
         results.append(result)
 
-        pd.concat(results, ignore_index=True).to_pickle(f'../../results/perf_spmm_{dataset_name}_{model_type}.pkl')
-    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance_spmm.pkl")
+        pd.concat(results, ignore_index=True).to_pickle(f'../../results/performance/perf{dataset_name}_{model_type}.pkl')
+    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance/performance.pkl")
 
 
 if __name__ == '__main__':
