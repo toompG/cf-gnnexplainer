@@ -19,7 +19,7 @@ from utils.utils import normalize_adj
 from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
 from gcn import GCNSynthetic
-from gcn_sparse import GCN
+from gcn_sparse import GCNReuseNormalisation
 
 
 def get_process_memory():
@@ -149,7 +149,7 @@ def main():
     for n, i in enumerate(['syn1', 'syn2', 'syn4', 'syn5']):
         model_path = script_dir / f'../../models/sparse_gcn_3layer_{i}.pt'
         data = datasets[n]
-        model = GCN(10, data.num_classes)
+        model = GCNReuseNormalisation(10, data.num_classes)
         model.load_state_dict(torch.load(model_path))
         model.eval()
 

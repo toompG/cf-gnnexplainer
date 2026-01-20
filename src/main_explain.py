@@ -4,7 +4,7 @@ import argparse
 import torch
 
 from gcn import GCNSynthetic
-from gcn_sparse import GCN
+from gcn_sparse import GCNReuseNormalisation, GCN
 from wrapper import WrappedOriginalGCN, GCNConvGCNSynthetic
 from cf_explanation.cf_explainer import CFExplainerNew, CFExplainer, \
                                         GreedyCFExplainer, BFCFExplainer
@@ -42,7 +42,7 @@ def explain_original_experiment(args, data):
         result.to_pickle(f"../results/{args.dst}.pkl")
         return
     if args.cf_method == 'cf_transposed':
-        model = GCN(data.x.shape[1], data.num_classes)
+        model = GCNReuseNormalisation(data.x.shape[1], data.num_classes)
         load_sparse_dense_weights(model, model_path)
     else:
         submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,

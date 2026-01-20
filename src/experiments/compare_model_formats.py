@@ -1,4 +1,4 @@
-'''
+"""
 compare_model_formats.py
 
 Compare the forward pass, gradient descent and counterfactuals between
@@ -20,7 +20,7 @@ GCNConGCNSyntethetic | within float error | withing float error |  identical
 GCN                  | within float error | different           |  different
 WrappedOriginalGCN   | identical          | identical           |  identical
 
-'''
+"""
 
 import sys
 import os
@@ -33,7 +33,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.test_functions import load_dataset, load_sparse_dense_weights
 
 from gcn import GCNSynthetic
-from gcn_sparse import GCN
+from gcn_sparse import GCN, GCNReuseNormalisation
 
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
 from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
@@ -106,7 +106,7 @@ def compare_dense_vs_sparse_gradients(dense_model, sparse_model, x, adj_dense,
                     print(E, i, j, i-j)
 
         mean_error = (sum(abs(dense_grads - sparse_grads)) / dense_grads.shape[0]).item()
-        max_error = (dense_grads - sparse_grads).max().item()
+        max_error = (dense_grads - sparse_grads).abs().max().item()
 
         if verbose:
             print(f"mean difference grad: {mean_error}")
@@ -153,7 +153,7 @@ def main():
 
     method_map = {
         'gcnmm': GCNConvGCNSynthetic,
-        'gcn': GCN,
+        'gcn': GCNReuseNormalisation,
         'wrapped': WrappedOriginalGCN
     }
 
@@ -192,8 +192,8 @@ def main():
     # Calculate error from forward call
     print('Original weights')
     print(f'Total err: {(out_dd - out_sd).sum():.2e}')
-    print(f'Forward max err:   {(out_dd - out_sd).max():.2e}')
-    print(f'Forward mean err:  {(out_dd - out_sd).mean():.2e}')
+    print(f'Forward max err:   {abs(out_dd - out_sd).max():.2e}')
+    print(f'Forward mean err:  {abs(out_dd - out_sd).mean():.2e}')
 
     mean_errors = []
     max_errors = []
@@ -222,25 +222,22 @@ def main():
     index = data.test_set
 
     momentum = .9 if args.exp == 'syn1' else 0.0
-    df_original = explain_original(dense_dense, data, .1, 0, 500, target=index, n_momentum=momentum)
-    df_original_gcnconv = explain_new(sparse_dense, data.x, data.edge_index, data.y, target=index, lr=.1)
+    df_original = explain_original(dense_dense, data, .1, momentum, 500, target=index)
+    df_original_gcnconv = explain_new(sparse_dense, data.x, data.edge_index, data.y, target=index, lr=.1, n_momentum=momentum)
 
     mask1 = df_original['cf_mask']
     mask2 = df_original_gcnconv['cf_mask']
 
     scores = []
     for i, j in zip(mask1, mask2):
-        if any(i ^ j == 1):
-            print(data.edge_index.T[torch.where(~i)])
-            print(data.edge_index.T[torch.where(~j)])
+        # if any(i ^ j == 1):
+        #     print(data.edge_index.T[torch.where(~i)])
+        #     print(data.edge_index.T[torch.where(~j)])
 
         scores.append(jaccard_similarity(i, j))
 
     similarity = sum(scores) / len(scores)
-    if similarity == 1:
-        print('\033[92m' + 'SUCCESS: All counterfactuals are identical!')
-    else:
-        print(f'Jaccard similarity: {similarity:.3f}')
+    print(f'Jaccard similarity: {similarity:.3f}')
 
 
 if __name__ == '__main__':

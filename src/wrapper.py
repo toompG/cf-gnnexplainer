@@ -1,9 +1,9 @@
-'''
+"""
 wrapper.py
 
 Contains two interfaces that allow us to use original classifier models
 in new cf-gnnexplainer that expects COO formatting.
-'''
+"""
 
 import torch
 
@@ -16,8 +16,8 @@ from utils.utils import get_degree_matrix
 
 
 def edge_index2norm_adj(edge_index, edge_weight=None, num_nodes=None):
-    ''' Convert edge_index and edge_weight into normalised form the original model
-     expects '''
+    """ Convert edge_index and edge_weight into normalised form the original model
+     expects """
     if num_nodes is None:
         num_nodes = edge_index.max().item() + 1
 
@@ -44,11 +44,11 @@ def edge_index2norm_adj(edge_index, edge_weight=None, num_nodes=None):
 
 
 class WrappedOriginalGCN(torch.nn.Module):
-    '''
+    """
     Interface for original GCNSynthetic model that converts edges and weights
     in coo-format to full normalised adjacency matrix. Results are completely
     identical.
-    '''
+    """
 
     def __init__(self, submodel):
         super().__init__()
@@ -62,11 +62,11 @@ class WrappedOriginalGCN(torch.nn.Module):
 
 
 class GCNConvGCNSynthetic(torch.nn.Module):
-    '''
+    """
     Version of GCNSynthetic that uses GCNConv with weights from original
     to calculate forward and backward. Results are within floating point
     error.
-    '''
+    """
     def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
         super().__init__()
         self.conv1 = GCNConv(num_features, n_hid, add_self_loops=False, normalize=False, bias=False)
@@ -81,11 +81,11 @@ class GCNConvGCNSynthetic(torch.nn.Module):
         self.dropout = dropout
 
     def normalize_adj(self, edge_index, edge_weight, num_nodes):
-        '''
+        """
         Normalization weights calculated manually rather than relying on
         GCNConv functionality. Using normalize=True in GCNConv works for forward
         pass but diverges in loss.backward()
-        '''
+        """
         A_tilde = torch.zeros(num_nodes, num_nodes) + torch.eye(num_nodes)
         A_tilde[edge_index[0], edge_index[1]] = edge_weight
         D_tilde = get_degree_matrix(A_tilde).detach()

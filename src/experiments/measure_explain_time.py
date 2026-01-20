@@ -13,7 +13,7 @@ from measure_performance import measure_function_time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.test_functions import load_dataset, explain_new, explain_original
 from gcn import GCNSynthetic
-from gcn_sparse import GCN
+from gcn_sparse import GCNReuseNormalisation
 from wrapper import WrappedOriginalGCN
 from cf_explanation.cf_explainer import CFExplainerNew, GreedyCFExplainer, BFCFExplainer
 
@@ -34,7 +34,7 @@ def main():
 
         model_path = script_dir / f'../../models/sparse_gcn_3layer_{i}.pt'
         data = datasets[i]
-        model = GCN(10, data.num_classes)
+        model = GCNReuseNormalisation(10, data.num_classes)
         model.load_state_dict(torch.load(model_path))
         model.eval()
 

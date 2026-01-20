@@ -14,8 +14,8 @@ from cmp_original import WrappedOriginalGCN
 
 
 def calculate_accuracy_new(df, data, motif_edges_set):
-    ''' New accuracy calculation. Uses ground truths and only evaluates
-     true positives found by classifier model. '''
+    """ New accuracy calculation. Uses ground truths and only evaluates
+     true positives found by classifier model. """
     df_motif = df[df["label"] != 0].reset_index(drop=True)
     df_motif = df_motif[df_motif["prediction"] != 0].reset_index(drop=True)
 
@@ -32,7 +32,7 @@ def calculate_accuracy_new(df, data, motif_edges_set):
 
 
 def calculate_accuracy_original(df, data, motif_nodes):
-    ''' Exact recreation of original accuracy function. '''
+    """ Exact recreation of original accuracy function. """
     df_motif = df[df["prediction"] != 0].reset_index(drop=True)
 
     accuracy = []

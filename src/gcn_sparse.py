@@ -1,4 +1,4 @@
-'''
+"""
 gcn_sparse.py
 
 gcn_sparse implements a GCN for COO-formatted node classification. Training
@@ -6,7 +6,7 @@ settings for every model used in the experiments are stored and may be
 re-used using
 
 python3 gcn_sparse.py --exp=[DATASET]
-'''
+"""
 
 
 import torch.nn.utils
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 from torch_geometric.nn import GCNConv
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 from utils.test_functions import load_dataset, explain_new
 
@@ -47,6 +48,37 @@ class GCN(torch.nn.Module):
         return F.log_softmax(x, dim=1)
 
 
+class GCNReuseNormalisation(torch.nn.Module):
+    def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
+        super().__init__()
+        self.conv1 = GCNConv(num_features, n_hid, bias=False, normalize=False)
+        self.conv2 = GCNConv(n_hid, n_hid, bias=False, normalize=False)
+        self.conv3 = GCNConv(n_hid, n_out, bias=False, normalize=False)
+        self.lin = nn.Linear(2 * n_hid + n_out, num_classes)
+        self.dropout = dropout
+
+        self.bias1 = nn.Parameter(torch.zeros(n_hid))
+        self.bias2 = nn.Parameter(torch.zeros(n_hid))
+        self.bias3 = nn.Parameter(torch.zeros(n_out))
+
+    def forward(self, x, edge_index, edge_weight=None):
+        edge_index, edge_weight = gcn_norm(
+            edge_index,
+            edge_weight,
+            num_nodes=x.size(0),
+            add_self_loops=True,
+            dtype=x.dtype
+        )
+
+        x1 = F.relu(self.conv1(x, edge_index, edge_weight=edge_weight) + self.bias1)
+        x1 = F.dropout(x1, p=self.dropout, training=self.training)
+        x2 = F.relu(self.conv2(x1, edge_index, edge_weight=edge_weight) + self.bias2)
+        x2 = F.dropout(x2, p=self.dropout, training=self.training)
+        x3 = self.conv3(x2, edge_index, edge_weight) + self.bias3
+        x = self.lin(torch.cat((x1, x2, x3), dim=1))
+        return F.log_softmax(x, dim=1)
+
+
 class SmolGCN(torch.nn.Module):
     def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
         super().__init__()
@@ -63,7 +95,7 @@ class SmolGCN(torch.nn.Module):
 
 def train_model(data, device, lr, hidden, dropout, weight_decay, clip,
                 end=500, dst='result', save=False, show_progress=True):
-    ''' Train GCN model '''
+    """ Train GCN model """
     model = GCN(data.num_features, data.num_classes,
                 hidden, hidden, dropout=dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)

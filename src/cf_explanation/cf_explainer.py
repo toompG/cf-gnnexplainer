@@ -27,10 +27,10 @@ def convert_subadj_to_full_mask(node_dict, sub_adj, edge_index):
 
 
 class CFExplainerNew:
-    '''
+    """
     New version of CF Explainer to help in training perturb object for model
     that use COO format.
-    '''
+    """
     def __init__(self, model, device='cpu', epochs=500, lr=0.1, n_momentum=0.0, **kwargs):
         self.model = model
         self.epochs = epochs
@@ -40,7 +40,7 @@ class CFExplainerNew:
         self.kwargs = kwargs
 
     def __call__(self, index, x, edge_index):
-        ''' Find an edge mask that predicts a different label. '''
+        """ Find an edge mask that predicts a different label. """
         cf_model = GCNSyntheticPerturbEdgeWeight(self.model, index, x, edge_index)
         optimizer = torch.optim.SGD([cf_model.P_vec], lr=self.lr,
                                     momentum=self.n_momentum,
@@ -66,7 +66,7 @@ class CFExplainerNew:
 
 
 class BFCFExplainer(CFExplainerNew):
-    '''
+    """
     Find counterfactuals by sampling initial grads to use as priority
     before running exhaustive search of every combination, up to max
     as given by the number of epochs.
@@ -75,9 +75,9 @@ class BFCFExplainer(CFExplainerNew):
     eg: 5 = ...0000101 removes the first and third edges in ranking.
 
     Best CF is chosen first by distance by lowest score of original prediction.
-    '''
+    """
     def __call__(self, index, x, edge_index):
-        ''' Find an edge mask that predicts a different label. '''
+        """ Find an edge mask that predicts a different label. """
         cf_model = GCNSyntheticPerturbEdgeWeight(self.model, index, x, edge_index,
                                                  beta=0.5)
         prediction = cf_model.original_class
@@ -125,16 +125,16 @@ class BFCFExplainer(CFExplainerNew):
 
 
 class GreedyCFExplainer(CFExplainerNew):
-    '''
+    """
     Find counterfactuals by sampling initial grads, then removes edges in order
     of importance.
 
     To avoid skewing mean distance of results, max distance may be passed before
     search is called off.
-    '''
+    """
 
     def __call__(self, index, x, edge_index, max_distance=10):
-        ''' Find an edge mask that predicts a different label. '''
+        """ Find an edge mask that predicts a different label. """
         cf_model = GCNSyntheticPerturbEdgeWeight(self.model, index, x, edge_index,
                                                  beta=0.5)
         prediction = cf_model.original_class

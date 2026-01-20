@@ -52,8 +52,8 @@ def load_dataset(path, device):
 
 
 def load_sparse_dense_weights(model, path):
-    ''' Load GCN or GCNConvSynthetic with weights from
-     original classifier models. '''
+    """ Load GCN or GCNConvSynthetic with weights from
+     original classifier models. """
 
     old_state_dict = torch.load(path)
     print(*old_state_dict.keys())
@@ -116,7 +116,7 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
 
 def explain_new(model, x, edge_index, y, target, cf_model=CFExplainerNew, n_hops=4,
                device='cpu', epochs=500, lr=0.1, n_momentum=0.0, eps=0.0):
-    '''
+    """
     Explain nodes in target using a cf_model
 
     Calculates node subgraph
@@ -124,7 +124,7 @@ def explain_new(model, x, edge_index, y, target, cf_model=CFExplainerNew, n_hops
     Adds other required data for analysis of performance
 
     Returns dataframe that might be used in analysis using evaluate.py
-    '''
+    """
     predictions = torch.argmax(model(x, edge_index), dim=1)
     explainer = cf_model(model, device, epochs, lr, n_momentum, eps=eps)
 
