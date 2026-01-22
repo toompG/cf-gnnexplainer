@@ -28,6 +28,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
             self.original_class = torch.argmax(model(x, edge_index)[index])
 
         self.P_vec = Parameter(torch.ones(self.edge_index.shape[1] // 2))
+        self.edge_mask = torch.ones(edge_index.shape[1]).bool()
         self.reset_parameters()
 
     def reset_parameters(self, initial=1.0, eps=0.0):
@@ -46,9 +47,6 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         self.edge_weight_params[self.matched_edges[0]] = self.P_vec
         self.edge_weight_params[self.matched_edges[1]] = self.P_vec
 
-        # Mask calculated here so it is set if user does not call forward hard.
-        self.edge_mask = (self.edge_weight_params > 0)
-
         return self.model(self.x, self.edge_index,
                           edge_weight=torch.sigmoid(self.edge_weight_params))[self.index]
 
@@ -56,6 +54,7 @@ class GCNSyntheticPerturbEdgeWeight(nn.Module):
         """
         predict original model with edge deletion
         """
+        self.edge_mask = (self.edge_weight_params > 0)
         return self.model(self.x, self.edge_index[:, self.edge_mask])[self.index]
 
     def loss(self, output, y_new):

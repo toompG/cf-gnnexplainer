@@ -56,7 +56,6 @@ def load_sparse_dense_weights(model, path):
      original classifier models. """
 
     old_state_dict = torch.load(path)
-    print(*old_state_dict.keys())
     new_state_dict = {
         'conv1.lin.weight': old_state_dict['gc1.weight'].T,
         'conv2.lin.weight': old_state_dict['gc2.weight'].T,

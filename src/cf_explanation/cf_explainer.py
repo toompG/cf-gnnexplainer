@@ -1,4 +1,3 @@
-import time
 import torch
 import numpy as np
 import torch.optim as optim
@@ -8,22 +7,6 @@ from torch_geometric.utils import dense_to_sparse
 from utils.utils import get_degree_matrix
 from .gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 from .gcn_perturb import GCNSyntheticPerturb
-
-def convert_subadj_to_full_mask(node_dict, sub_adj, edge_index):
-    vals = []
-
-    for i in edge_index.T:
-        v1 = i[0].item()
-        v2 = i[1].item()
-
-        if v1 not in node_dict or v2 not in node_dict:
-            vals.append(True)
-            continue
-        v1 = node_dict[v1]
-        v2 = node_dict[v2]
-        vals.append(bool(sub_adj[v1][v2]))
-
-    return torch.tensor(vals)
 
 
 class CFExplainerNew:

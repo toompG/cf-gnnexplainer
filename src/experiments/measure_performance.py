@@ -14,7 +14,7 @@ from tqdm import tqdm
 from functools import partial
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.test_functions import load_dataset
+from utils.test_functions import load_dataset, load_sparse_dense_weights
 from utils.utils import normalize_adj
 from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
@@ -147,17 +147,16 @@ def main():
 
     models = []
     for n, i in enumerate(['syn1', 'syn2', 'syn4', 'syn5']):
-        model_path = script_dir / f'../../models/sparse_gcn_3layer_{i}.pt'
+        model_path = script_dir / f'../../models/gcn_3layer_{i}.pt'
         data = datasets[n]
         model = GCNReuseNormalisation(10, data.num_classes)
-        model.load_state_dict(torch.load(model_path))
+        load_sparse_dense_weights(model, model_path)
         model.eval()
 
         y_pred = torch.argmax(model(data.x, data.edge_index), dim=1)
         assert (y_pred == data.y).float().mean() > 0.8
         models.append(model)
 
-        model_path = script_dir / f'../../models/gcn_3layer_{i}.pt'
         dense = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
                             nclass=len(data.y.unique()), dropout=0)
         dense.load_state_dict(torch.load(model_path))
@@ -187,8 +186,8 @@ def main():
         result.insert(0, 'dataset', ' '.join([dataset_name, model_type]))
         results.append(result)
 
-        pd.concat(results, ignore_index=True).to_pickle(f'../../results/performance/perf{dataset_name}_{model_type}.pkl')
-    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance/performance.pkl")
+        pd.concat(results, ignore_index=True).to_pickle(f'../../results/performance/final_perf{dataset_name}_{model_type}.pkl')
+    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance/final_performance.pkl")
 
 
 if __name__ == '__main__':
