@@ -65,7 +65,7 @@ class BFCFExplainer(CFExplainerNew):
                                                  beta=0.5)
         prediction = cf_model.original_class
 
-        edges, scores = cf_model.score_edges(num_samples=10,
+        edges, scores = cf_model.score_edges(num_samples=1,
                                              eps=self.kwargs['eps'])
 
         # Modify scores to remove positive grads after negatives but before 0.0
@@ -123,7 +123,7 @@ class GreedyCFExplainer(CFExplainerNew):
         prediction = cf_model.original_class
 
         # Create ranking of most important edges
-        edges, scores = cf_model.score_edges(num_samples=10,
+        edges, scores = cf_model.score_edges(num_samples=1,
                                              eps=self.kwargs['eps'])
 
         # Modify scores to remove positive grads after negatives but before 0.0

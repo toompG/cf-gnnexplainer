@@ -21,7 +21,7 @@ cf_explainers_sparse = [CFExplainerNew, GreedyCFExplainer, BFCFExplainer]
 
 def measure_sparse(models, exp, data):
     results = []
-    if exp == 'syn1' or 'syn2':
+    if exp == 'syn1' or exp == 'syn2':
         momentum = 0.9
     else:
         momentum = 0.0

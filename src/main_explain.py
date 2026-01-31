@@ -62,7 +62,7 @@ def explain_original_experiment(args, data):
 
 def explain_sparse(args, data):
     script_dir = Path(__file__).parent
-    model_path = script_dir / f'../models/sparse_gcn_3layer_{args.exp}.pt'
+    model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
 
     cf_model = cf_explainers.get(args.cf_method, CFExplainerNew)
     if cf_model == CFExplainer:
@@ -71,8 +71,8 @@ def explain_sparse(args, data):
              Leave cf_method unassigned to default to CFExplainerNew'
         )
 
-    model = GCN(data.x.shape[1], data.num_classes)
-    model.load_state_dict(torch.load(model_path))
+    model = GCNReuseNormalisation(data.x.shape[1], data.num_classes)
+    load_sparse_dense_weights(model, model_path)
     model.eval()
 
     result = explain_new(

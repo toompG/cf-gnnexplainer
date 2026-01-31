@@ -199,18 +199,27 @@ def main():
     max_errors = []
 
     for i in tqdm(index):
-        cf_dd = GCNSyntheticPerturb(10, 20, 20, data.num_classes, data.adj, 0.0, 0.5)
+        cf_dd = GCNSyntheticPerturb(10, 20, 20, data.num_classes, data.adj,
+                                    0.0, 0.5)
         cf_dd.load_state_dict(dense_dense.state_dict(), strict=False)
 
-        cf_sd = GCNSyntheticPerturbEdgeWeight(sparse_dense, i, data.x, data.edge_index)
+        cf_sd = GCNSyntheticPerturbEdgeWeight(sparse_dense, i, data.x,
+                                              data.edge_index)
 
         for j in [cf_dd, cf_sd]:
             for name, param in j.named_parameters():
                 if 'P_vec' not in name:
                     param.requires_grad_(False)
 
-        mean_err, max_err = compare_dense_vs_sparse_gradients(cf_dd, cf_sd, data.x, data.adj,
-                                          data.edge_index, epochs=1, correct_grads=False, verbose=args.verbose)
+        mean_err, max_err = compare_dense_vs_sparse_gradients(
+            cf_dd, cf_sd,
+            data.x,
+            data.adj,
+            data.edge_index,
+            epochs=5,
+            correct_grads=False,
+            verbose=args.verbose
+        )
 
         if mean_err is not None and max_err is not None:
             mean_errors.append(mean_err)
