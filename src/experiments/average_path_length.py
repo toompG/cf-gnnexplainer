@@ -1,16 +1,14 @@
+"""
+average_path_length.py
 
-import torch
-import torch.nn.functional as F
+Script used to populate table about the datasets used in experiments.
+"""
 
 import networkx as nx
 from torch_geometric.utils import to_networkx
 
-
-from itertools import combinations
 from torch_geometric.data import Data
-
 from torch_geometric.utils import k_hop_subgraph
-
 
 import sys
 import os

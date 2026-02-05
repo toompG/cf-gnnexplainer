@@ -1,11 +1,11 @@
 """
 gcn_sparse.py
 
-gcn_sparse implements a GCN for COO-formatted node classification. Training
-settings for every model used in the experiments are stored and may be
-re-used using
+gcn_sparse implements a GCN for COO-formatted node classification.
 
+usage:
 python3 gcn_sparse.py --exp=[DATASET]
+
 """
 
 
@@ -77,20 +77,6 @@ class GCNReuseNormalisation(torch.nn.Module):
         x3 = self.conv3(x2, edge_index, edge_weight) + self.bias3
         x = self.lin(torch.cat((x1, x2, x3), dim=1))
         return F.log_softmax(x, dim=1)
-
-
-class SmolGCN(torch.nn.Module):
-    def __init__(self, num_features, num_classes, n_hid=20, n_out=20, dropout=0.0):
-        super().__init__()
-        self.conv1 = GCNConv(num_features, n_hid)
-        self.conv2 = GCNConv(n_hid, num_classes)
-        self.dropout = dropout
-
-    def forward(self, x, edge_index, edge_weight=None):
-        x1 = self.conv1(x, edge_index, edge_weight=edge_weight).relu()
-        x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = self.conv2(x1, edge_index, edge_weight=edge_weight)
-        return F.log_softmax(x2, dim=1)
 
 
 def train_model(data, device, lr, hidden, dropout, weight_decay, clip,

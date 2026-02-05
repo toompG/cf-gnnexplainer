@@ -1,3 +1,8 @@
+"""
+Code for training classifier GCN.
+Unaltered from original CF-GNNExplainer paper's implementation.
+"""
+
 # Based on https://github.com/tkipf/pygcn/blob/master/pygcn/train.py
 
 from __future__ import division

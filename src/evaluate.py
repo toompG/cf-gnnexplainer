@@ -1,3 +1,17 @@
+"""
+evaluate.py
+
+Evaluate dataframe of counterfactuals for fidelity, size, sparcity, accuracy.
+Changed CF dataframe format, added GT accuracy, support for models trained
+using gcn_sparse.py
+
+usage:
+
+python3 evaluate.py --exp=syn1 --dst=[DF LOCATION]
+
+"""
+
+
 import argparse
 import numpy as np
 import pandas as pd
@@ -10,7 +24,8 @@ from pathlib import Path
 from torch_geometric.utils import k_hop_subgraph, mask_select
 from gcn import GCNSynthetic
 from gcn_sparse import GCN
-from cmp_original import WrappedOriginalGCN
+
+from wrapper import WrappedOriginalGCN
 
 
 def calculate_accuracy_new(df, data, motif_edges_set):
@@ -66,20 +81,6 @@ def main():
     if '.pkl' not in args.dst:
         args.dst = args.dst + '.pkl'
 
-    if args.sparse:
-        model_path = script_dir / f'../models/sparse_gcn_3layer_{args.exp}.pt'
-        classifier = GCN(data.x.shape[1], data.num_classes)
-        classifier.load_state_dict(torch.load(model_path))
-        classifier.eval()
-    else:
-        model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
-        submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
-                        nclass=len(data.y.unique()), dropout=0)
-
-        submodel.load_state_dict(torch.load(model_path))
-        submodel.eval()
-        classifier = WrappedOriginalGCN(submodel).eval()
-
     with open(f'../results/{args.dst}', "rb") as f:
         df = pd.read_pickle(f)
 
@@ -95,11 +96,28 @@ def main():
     df_motif_new = calculate_accuracy_new(df, data, motif_edges_set)
     cfs = df.dropna().reset_index()
 
+    # Set model for full dataset motif nodes and to verify correctness.
+    if args.sparse:
+        model_path = script_dir / f'../models/sparse_gcn_3layer_{args.exp}.pt'
+        classifier = GCN(data.x.shape[1], data.num_classes)
+        classifier.load_state_dict(torch.load(model_path))
+        classifier.eval()
+    else:
+        model_path = script_dir / f'../models/gcn_3layer_{args.exp}.pt'
+        submodel = GCNSynthetic(nfeat=data.x.shape[1], nhid=20, nout=20,
+                        nclass=len(data.y.unique()), dropout=0)
+
+        submodel.load_state_dict(torch.load(model_path))
+        submodel.eval()
+        classifier = WrappedOriginalGCN(submodel).eval()
+
+    # Find all motif nodes in dataset
     predictions = torch.argmax(classifier(data.x, data.edge_index), dim=1)
     motif_nodes = set((i.item() for i in torch.where(predictions > 0)[0]))
     df_motif = calculate_accuracy_original(df, data, motif_nodes)
 
     for i in range(len(cfs)):
+        # Verify correctness
         cf_edges = data.edge_index[:, cfs['cf_mask'][i]]
         assert torch.argmax(classifier(data.x, cf_edges)[cfs['node'][i].item()]) == cfs['cf_prediction'][i]
 

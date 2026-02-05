@@ -1,39 +1,67 @@
-# CF-GNNExplainer: Counterfactual Explanations for Graph Neural Networks
+# CF-GNNExplainer in PyTorch Geometric
 
-This repository is the official implementation of the [AISTATS 2022 paper CF-GNNExplainer: Counterfactual Explanations for Graph Neural Networks](https://arxiv.org/abs/2102.03322). 
+
+This repository reimplements CF-GNNExplainer based on [AISTATS 2022 paper CF-GNNExplainer: Counterfactual Explanations for Graph Neural Networks](https://arxiv.org/abs/2102.03322).
+
+CF-GNNExplainer was initially purely based on PyTorch, implementing GCN using
+matrix multiplication and performing operations on the full adjacency matrix.
+We reworked the method to use functionality from PyTorch Geometric, improving
+the algorithmic complexity in the process.
+
+Additionally we implement two new methods, greedy and brute-force, that
+generate candidate counterfactuals differently for greater exploration and
+performance.
 
 ## Requirements
 
 To install requirements:
 
 ```setup
-conda env create --file environment.yml
+pip install -r requirements.txt
+
 ```
 
->📋 This will create a conda environment called pytorch-geo
+## Recreation
 
-## Training original models
+The primary difference between versions is that PyG stores edge information
+in COO-format, 2xE tensor of just the edges that are present whereas the
+original implementation used full adjacency matrices. Original is known as
+dense whereas our implementation is called sparse. In our experiments, we
+want to explain the same classifiers as before despite this difference.
+For this, we may use an interface to convert between edge formats.
 
-To train the original GNN models for the BA-shapes dataset in the paper, cd into src and run this command:
+## Training node classifiers
 
+Pytorch Geometric's GCNConv uses a different format to store weights compared
+to the original version. Because of this, there are two function with which to
+train the classifiers.
+
+Dense:
 ```train
 python train.py --dataset=syn1
 ```
 
->📋  For the Tree-Cycles dataset, the dataset argument should be "syn4". For the Tree-Grid dataset, it should be "syn5". All hyperparameter settings are listed in the defaults, and all models have the same hyperparameters. 
+Sparse:
+```gcn_sparce
+python gcn_sparce --exp=syn1
+```
 
+> Datasets are "syn1" for BAShapes, "syn2" for BACommunity, "syn4" for Tree-Grid,
+and "syn5" for Tree-Cycle ([source](https://github.com/RexYing/gnn-model-explainer)).
+All hyperparameter settings are listed in the defaults.
 
 ## Training CF-GNNExplainer
 
-To train CF-GNNExplainer for each dataset, run the following commands:
+To explain nodes for each dataset
 
 ```train
-python main_explain.py --dataset=syn1 --lr=0.01 --beta=0.5 --n_momentum=0.9 --optimizer=SGD
-python main_explain.py --dataset=syn4 --lr=0.1 --beta=0.5 --optimizer=SGD
-python main_explain.py --dataset=syn5 --lr=0.1 --beta=0.5 --optimizer=SGD
+python main_explain.py --exp=syn1 --method=original --momentum=0.9 --epochs=100
+python main_explain.py --exp=syn4 --sparse=True --model=sparse_gcn_3layer_syn4.pt
+python main_explain.py --exp=syn5
 ```
 
->📋  This will create another folder in the main directory called 'results', where the results files will be stored.
+> results are saved to results folder. use --sparse=True to select new framework.
+other options are explain in main_explain.py
 
 
 ## Evaluation
@@ -41,21 +69,32 @@ python main_explain.py --dataset=syn5 --lr=0.1 --beta=0.5 --optimizer=SGD
 To evaluate the CF examples, run the following command:
 
 ```eval
-python evaluate.py --path=../results/<NAME OF RESULTS FILE>
+python evaluate.py --exp=syn1 --path=../results/<NAME OF RESULTS FILE>
 ```
->📋  This will print out the values for each metric.
+> evaluate has an inbuilt check to verify that counterfactual examples lead
+to the prediction in the dataframe. Use --sparse=True for classifiers trained
+using gcn_sparse.py
 
 ## Pre-trained Models
 
-The pretrained models are available in the models folder
+The pretrained models are available in the models folder. Sparse models are
+provided, but are unused in any thesis experiments.
 
+## Experiments
+
+In the thesis we perform experiments to show: (1) if we faithfully recreated
+the original framework, (2) how our implementation affected the scalability, and
+(3) how our newly proposed methods affect counterfactual quality and model performance.
+
+Experiment 1 is found in scripts/eval_frameworks.sh for counterfactual evaluation, and src/experimetns/compare_all_formats.py for error measurements
+Experiment 2 is found in src/experiments/measure_performance.py
+Experiment 3 is found in scripts/eval_methods.sh for counterfactual evaluation, and src/experiments/measure_explain_time.py for performance
 
 ## Results
 
-Our model achieves the following performance:
-
-| Model name         | Dataset        | Fidelity       |  Size |    Sparsity   | Accuracy    |
-| ------------------ |---------------- | -------------- | -------------- | -------------- |   -------------- |
-| CF-GNNExplainer   |     Tree-Cycles  |      0.21       |      2.09           |       0.90        |      0.94       |
-| CF-GNNExplainer   |     Tree-Grid    |      0.07       |       1.47          |      0.94         |     0.96        |
-| CF-GNNExplainer   |     BA-Shapes    |      0.39       |       2.39          |       0.99        |      0.96        |
+1: We recreate identical behaviour when using wrapper to interface. Using PyG's
+gcn_norm leads to backwards graphs that produce different gradients that still
+create counterfactuals of decent quality.
+2: The new framework, when used on CPU, improves the algorithmic runtime complexity of cf-gnnexplainer. It is not faster for sparsely-connected networks from syn4 and syn5 datasets.
+3: Greedy is very fast without compromising counterfactual quality. Bruteforce is
+slightly faster and produces very minimal counterfactual examples.

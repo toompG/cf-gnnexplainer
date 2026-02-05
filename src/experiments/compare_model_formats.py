@@ -12,13 +12,14 @@ closely. GCNConvGCNSynthetic normalises adjacency itself using matrix multiplica
 WrappedOriginalGCN simply acts as an interface that converts between formats
 for use in GCNSynthetic.
 
-Results (double precision)
-
                      | Forward pass       | Backward pass       | Explanations
 ---------------------|--------------------|---------------------|--------------
 GCNConGCNSyntethetic | within float error | withing float error |  identical
 GCN                  | within float error | different           |  different
 WrappedOriginalGCN   | identical          | identical           |  identical
+
+example usage:
+python3 compare_model_formats.py --exp=syn1 --method=gcn
 
 """
 
@@ -28,13 +29,12 @@ import argparse
 
 import torch
 from tqdm import tqdm
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.test_functions import load_dataset, load_sparse_dense_weights
-
 from gcn import GCNSynthetic
-from gcn_sparse import GCN, GCNReuseNormalisation
-
+from gcn_sparse import GCNReuseNormalisation
 from cf_explanation.gcn_perturb import GCNSyntheticPerturb
 from cf_explanation.gcn_perturb_coo import GCNSyntheticPerturbEdgeWeight
 from wrapper import GCNConvGCNSynthetic, WrappedOriginalGCN
@@ -150,6 +150,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    script_dir = Path(__file__).parent
 
     method_map = {
         'gcnmm': GCNConvGCNSynthetic,
@@ -160,8 +161,8 @@ def main():
     to_test = method_map[args.method]
 
     # Dataset configuration
-    data_path = f'../../data/gnn_explainer/{args.exp}.pickle'
-    model_path = f'../../models/gcn_3layer_{args.exp}.pt'
+    data_path = script_dir / f'../../data/gnn_explainer/{args.exp}.pickle'
+    model_path = script_dir / f'../../models/gcn_3layer_{args.exp}.pt'
 
     print(f"Using: {args.exp}, {args.method}")
 
@@ -239,10 +240,6 @@ def main():
 
     scores = []
     for i, j in zip(mask1, mask2):
-        # if any(i ^ j == 1):
-        #     print(data.edge_index.T[torch.where(~i)])
-        #     print(data.edge_index.T[torch.where(~j)])
-
         scores.append(jaccard_similarity(i, j))
 
     similarity = sum(scores) / len(scores)
