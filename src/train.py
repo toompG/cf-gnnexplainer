@@ -1,3 +1,8 @@
+"""
+Code for training classifier GCN.
+Unaltered from original CF-GNNExplainer paper's implementation.
+"""
+
 # Based on https://github.com/tkipf/pygcn/blob/master/pygcn/train.py
 
 from __future__ import division
@@ -35,7 +40,7 @@ torch.manual_seed(args.seed)
 
 # Import dataset from GNN explainer paper
 with open("../data/gnn_explainer/{}.pickle".format(args.dataset[:4]), "rb") as f:
-	data = pickle.load(f)
+    data = pickle.load(f)
 
 # For models trained using our GCN_synethic from GNNExplainer,
 # using hyperparams from GNN explainer tasks
@@ -47,8 +52,8 @@ idx_test = torch.tensor(data["test_idx"])
 
 # Change to binary task: 0 if not in house, 1 if in house
 if args.dataset == "syn1_binary":
-	labels[labels==2] = 1
-	labels[labels==3] = 1
+    labels[labels==2] = 1
+    labels[labels==3] = 1
 
 norm_adj = normalize_adj(adj)
 
@@ -58,47 +63,47 @@ optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_
 
 
 if args.device == 'cuda':
-	model.cuda()
-	features = features.cuda()
-	norm_adj = norm_adj.cuda()
-	labels = labels.cuda()
-	idx_train = idx_train.cuda()
-	idx_test = idx_test.cuda()
+    model.cuda()
+    features = features.cuda()
+    norm_adj = norm_adj.cuda()
+    labels = labels.cuda()
+    idx_train = idx_train.cuda()
+    idx_test = idx_test.cuda()
 
 def train(epoch):
-	t = time.time()
-	model.train()
-	optimizer.zero_grad()
-	output = model(features, norm_adj)
-	loss_train = model.loss(output[idx_train], labels[idx_train])
-	y_pred = torch.argmax(output, dim=1)
-	acc_train = classification_accuracy(y_pred[idx_train], labels[idx_train])
-	loss_train.backward()
-	clip_grad_norm(model.parameters(), args.clip)
-	optimizer.step()
+    t = time.time()
+    model.train()
+    optimizer.zero_grad()
+    output = model(features, norm_adj)
+    loss_train = model.loss(output[idx_train], labels[idx_train])
+    y_pred = torch.argmax(output, dim=1)
+    acc_train = classification_accuracy(y_pred[idx_train], labels[idx_train])
+    loss_train.backward()
+    clip_grad_norm(model.parameters(), args.clip)
+    optimizer.step()
 
-	print('Epoch: {:04d}'.format(epoch+1),
-		  'loss_train: {:.4f}'.format(loss_train.item()),
-		  'acc_train: {:.4f}'.format(acc_train),
-		  'time: {:.4f}s'.format(time.time() - t))
+    print('Epoch: {:04d}'.format(epoch+1),
+          'loss_train: {:.4f}'.format(loss_train.item()),
+          'acc_train: {:.4f}'.format(acc_train),
+          'time: {:.4f}s'.format(time.time() - t))
 
 
 def test():
-	model.eval()
-	output = model(features, norm_adj)
-	loss_test = F.nll_loss(output[idx_test], labels[idx_test])
-	y_pred = torch.argmax(output, dim=1)
-	acc_test = classification_accuracy(y_pred[idx_test], labels[idx_test])
-	print("Test set results:",
-		  "loss= {:.4f}".format(loss_test.item()),
-		  "accuracy= {:.4f}".format(acc_test))
-	return y_pred
+    model.eval()
+    output = model(features, norm_adj)
+    loss_test = F.nll_loss(output[idx_test], labels[idx_test])
+    y_pred = torch.argmax(output, dim=1)
+    acc_test = classification_accuracy(y_pred[idx_test], labels[idx_test])
+    print("Test set results:",
+          "loss= {:.4f}".format(loss_test.item()),
+          "accuracy= {:.4f}".format(acc_test))
+    return y_pred
 
 
 # Train model
 t_total = time.time()
 for epoch in range(args.epochs):
-	train(epoch)
+    train(epoch)
 print("Optimization Finished!")
 print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 

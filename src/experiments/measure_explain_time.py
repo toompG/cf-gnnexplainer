@@ -1,3 +1,12 @@
+"""
+measure_explain_time.py
+
+Compares explain time for different methods and frameworks.
+Measures time to explain every node in the test set of the data for
+cf-gnnexplainer (sparse or dense), greedy, and bf.
+
+"""
+
 import sys
 import os
 from pathlib import Path
@@ -42,7 +51,6 @@ def measure_sparse(models, exp, data):
         )
         measurement.insert(0, 'method', explain_method.__name__)
         measurement.insert(0, 'dataset', exp)
-        # measurement.to_pickle(script_dir / f'../../results/explain_time/{exp}{explain_method.__name__}.pkl')
         results.append(measurement)
     return results
 
@@ -69,7 +77,6 @@ def measure_dense(models, exp, data):
 
         measurement.insert(0, 'method', 'Dense' + skipped)
         measurement.insert(0, 'dataset', exp)
-        # measurement.to_pickle(script_dir / f'../../results/explain_time/{exp}Dense{skipped}.pkl')
         results.append(measurement)
     return results
 
@@ -111,7 +118,9 @@ def main():
         results += measure_sparse(models, exp, data)
         results += measure_dense(models, exp, data)
 
-    pd.concat(results, ignore_index=True).to_pickle(script_dir / f'../../results/explain_time/final_result.pkl')
+    output_path = script_dir / f"../results/explain_time/final_result.pkl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.concat(results, ignore_index=True).to_pickle(output_path)
 
 
 if __name__ == '__main__':

@@ -1,3 +1,12 @@
+"""
+test_functions.py
+
+contains a set of helper functions for loading data and model and for
+explaining datasets while storing results in consistent format used in main
+functions and many experiments.
+
+"""
+
 import os
 import sys
 import torch
@@ -16,11 +25,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cf_explanation.cf_explainer import CFExplainer, CFExplainerNew
 
 
+# column name for dataframe for the explanation functions
 columns = ['node', 'label', 'prediction', 'cf_prediction',
            'distance', 'cf_mask']
 
 
 def load_dataset(path, device):
+    ''' Set graph data and some hyperparameters. '''
     with open(path, 'rb') as f:
         graphdata = pickle.load(f)
 
@@ -71,12 +82,21 @@ def load_sparse_dense_weights(model, path):
 
 def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
                      device='cpu', target=None, skip=True):
-    predictions = torch.argmax(model(data.x, data.norm_adj), dim=1)
+    """
+    Explain all nodes in target using original framework,
 
+    Calculates node subgraphs
+    Convert result for subgraph back to values for old graph
+    Adds other required data for analysis of performance
+
+    Returns dataframe that might be used in analysis using evaluate.py
+    """
+    predictions = torch.argmax(model(data.x, data.norm_adj), dim=1)
     nodes = data.test_set if target == None else target
 
     test_cf_examples = []
     for i in tqdm(nodes):
+        # Create sub adjacency
         sub_nodes, sub_edge_index, mapping, edge_mask = k_hop_subgraph(
             int(i),
             4,
@@ -84,8 +104,9 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
             relabel_nodes=True
         )
         sub_index = mapping[0]
+        #! incorrect feature matrix is not uniform
+        #! nodes relabeled for better memory locality in performance tests
         sub_x = data.x[sub_nodes]
-
         sub_adj = torch.zeros(sub_nodes.shape[0], sub_nodes.shape[0])
         sub_adj[sub_edge_index[0], sub_edge_index[1]] = 1
 
@@ -97,7 +118,7 @@ def explain_original(model, data, lr=.1, n_momentum=0.0, epochs=500,
                                        n_momentum=n_momentum, num_epochs=epochs)
 
         if not np.isnan(cf_example[1]):
-            # convert n x n cf_adj to 1d vector
+            # convert n x n subadjaceny cf to 1d vector aligned with edge_index
             cf_mask = (cf_example[-1][sub_edge_index[0], sub_edge_index[1]]).bool()
 
             subgraph_edge_positions = torch.where(edge_mask)[0]
@@ -137,7 +158,7 @@ def explain_new(model, x, edge_index, y, target, cf_model=CFExplainerNew, n_hops
             relabel_nodes=True
         )
         sub_index = mapping[0]
-        sub_x = x[sub_nodes]
+        sub_x = x[sub_nodes] #! incorrect when feature matrix is not uniform
 
         cf_example = explainer(sub_index, sub_x, sub_edge_index)
 

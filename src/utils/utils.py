@@ -2,8 +2,7 @@ import os
 import errno
 import torch
 import numpy as np
-import pandas as pd
-from torch_geometric.utils import k_hop_subgraph, dense_to_sparse, to_dense_adj, subgraph
+from torch_geometric.utils import k_hop_subgraph, to_dense_adj, subgraph
 
 
 def mkdir_p(path):
@@ -21,18 +20,9 @@ def safe_open(path, w):
     mkdir_p(os.path.dirname(path))
     return open(path, w)
 
+
 def classification_accuracy(pred, target):
     return (pred == target).sum().item() / target.numel()
-
-def classification_accuracy(pred, target):
-	return (pred == target).sum().item() / target.numel()
-
-
-def accuracy(output, labels):
-    preds = output.max(1)[1].type_as(labels)
-    correct = preds.eq(labels).double()
-    correct = correct.sum()
-    return correct / len(labels)
 
 
 def get_degree_matrix(adj):
@@ -75,25 +65,6 @@ def create_vec_from_symm_matrix(matrix, P_vec_size):
     idx = torch.tril_indices(matrix.shape[0], matrix.shape[0])
     vector = matrix[idx[0], idx[1]]
     return vector
-
-
-def index_to_mask(index, size):
-    mask = torch.zeros(size, dtype=torch.bool, device=index.device)
-    mask[index] = 1
-    return mask
-
-def get_S_values(pickled_results, header):
-    df_prep = []
-    for example in pickled_results:
-        if example != []:
-            df_prep.append(example[0])
-    return pd.DataFrame(df_prep, columns=header)
-
-
-def redo_dataset_pgexplainer_format(dataset, train_idx, test_idx):
-
-    dataset.data.train_mask = index_to_mask(train_idx, size=dataset.data.num_nodes)
-    dataset.data.test_mask = index_to_mask(test_idx[len(test_idx)], size=dataset.data.num_nodes)
 
 
 def find_edge_pairs(edge_index):

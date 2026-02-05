@@ -1,3 +1,13 @@
+"""
+measure_performance.py
+
+Compare performance between frameworks.
+Measures time to perform 100 epochs for each individual node for original and
+new implementations.
+
+"""
+
+
 import sys
 import os
 import time
@@ -32,8 +42,6 @@ def measure_function_time(benchmark_fun, num_trials=5):
     """Benchmark with full memory tracking including C/C++"""
     results = defaultdict(list)
 
-    # k_hop_edges = edge_index.shape[1]
-
     for trial in range(num_trials):
         mem_before = get_process_memory()
 
@@ -47,15 +55,11 @@ def measure_function_time(benchmark_fun, num_trials=5):
 
         # Store results
         results['trial'].append(trial)
-        # results['num_edges'].append(k_hop_edges)
         results['total_time'].append(total_train_time)
 
         results['mem_before_mb'].append(mem_before)
         results['mem_after_mb'].append(mem_after)
-        # results['mem_peak_mb'].append(max(memory_samples))
-        # results['mem_mean_mb'].append(np.mean(memory_samples))
         results['mem_delta_mb'].append(mem_after - mem_before)
-        # results['mem_samples'].append(len(memory_samples))
 
     return pd.DataFrame(results)
 
@@ -177,6 +181,9 @@ def main():
         ['TreeCycle',   'Dense',  datasets[3], models[7]]
     ]
 
+    result_dir = script_dir / '../../results/performance'
+    result_dir.parent.mkdir(parents=True, exist_ok=True)
+
     results = []
     for dataset_name, model_type, dataset, model in experiments:
         benchmark_fun = train_explainer_coo if model_type == 'Sparse' else train_explainer_dense
@@ -186,8 +193,8 @@ def main():
         result.insert(0, 'dataset', ' '.join([dataset_name, model_type]))
         results.append(result)
 
-        pd.concat(results, ignore_index=True).to_pickle(f'../../results/performance/final_perf{dataset_name}_{model_type}.pkl')
-    pd.concat(results, ignore_index=True).to_pickle(f"../../results/performance/final_performance.pkl")
+        pd.concat(results, ignore_index=True).to_pickle(result_dir / f'/final_perf{dataset_name}_{model_type}.pkl')
+    pd.concat(results, ignore_index=True).to_pickle(result_dir / 'final_performance.pkl')
 
 
 if __name__ == '__main__':

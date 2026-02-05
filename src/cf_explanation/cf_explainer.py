@@ -1,3 +1,14 @@
+"""
+cf_explainer.py
+
+Contains CFExplainerNew, a version of CF-GNNExplainer created for use with PyG,
+using edge_index in coo-format instead of a dense adjacency matrix.
+
+Additionally codes CFExplainer, a helper object present for the original
+implementation. The object was altered to remove print statements as well as
+some data collection necessary for counterfactual evaluation.
+"""
+
 import torch
 import numpy as np
 import torch.optim as optim
@@ -13,6 +24,12 @@ class CFExplainerNew:
     """
     New version of CF Explainer to help in training perturb object for model
     that use COO format.
+
+    To use, initialise with model you wish to explain, then call with
+    the index to explain, node features, and edge_index.
+
+    Return an edge mask that, when applied to edge_index, yields a new
+    prediction for the node of the provided index.
     """
     def __init__(self, model, device='cpu', epochs=500, lr=0.1, n_momentum=0.0, **kwargs):
         self.model = model
