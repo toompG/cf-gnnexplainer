@@ -27,7 +27,6 @@ from wrapper import WrappedOriginalGCN
 from cf_explanation.cf_explainer import CFExplainerNew, GreedyCFExplainer, BFCFExplainer
 
 
-# Dataset configurations
 DATASETS = {
     'syn1': {'file': 'syn1.pickle', 'model': 'gcn_3layer_syn1.pt'},
     'syn2': {'file': 'syn2.pickle', 'model': 'gcn_3layer_syn2.pt'},
@@ -188,8 +187,7 @@ def main():
         fig.canvas.draw_idle()
 
     def on_node_slider_drag(val):
-        node = int(node_slider.val)
-        text_box.set_val(str(node))
+        pass
 
     def on_mouse_release(event):
         if event.inaxes == ax_node_slider:
@@ -229,15 +227,15 @@ def main():
             if node in node_ids:
                 state['idx'] = node_ids.index(node)
                 node_slider.set_val(node)
+                refresh()
             else:
                 ax.set_title(f'Node {node} not in range', fontsize=12)
                 fig.canvas.draw_idle()
-            refresh()
         except ValueError:
             pass
 
     node_slider.on_changed(on_node_slider_drag)
-    fig.canvas.mpl_connect('button_release_event', on_mouse_release)  # compute on release
+    fig.canvas.mpl_connect('button_release_event', on_mouse_release)
     hop_slider.on_changed(on_hop_slider)
     radio.on_clicked(on_radio)
     btn_prev.on_clicked(on_prev)
