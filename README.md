@@ -98,3 +98,8 @@ create counterfactuals of decent quality.
 2: The new framework, when used on CPU, improves the algorithmic runtime complexity of cf-gnnexplainer. It is not faster for sparsely-connected networks from syn4 and syn5 datasets.
 3: Greedy is very fast without compromising counterfactual quality. Bruteforce is
 slightly faster and produces very minimal counterfactual examples.
+
+## Visualistaion
+
+To show the graphs and results of CF-GNNExplainer for the pre-existing datasets in an interactive UI element, run
+python display/display.py --exp=syn1
